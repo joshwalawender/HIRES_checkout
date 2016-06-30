@@ -1,0 +1,39 @@
+#!/bin/csh
+#
+# 2004-04-23 JM	 Updated to default NACQ to 1 if no input is given
+# 2004-08-08 GMH Updated for the new detector
+# 2004-07-14 GMH Updated for case obstype=Dark to keep shutter closed
+#
+date
+set NACQ = 1
+if ( $#argv >= 1 ) set NACQ = $1
+#
+set scratch = `show -s hiccd -terse obstype`
+set otype = $scratch[1]
+#
+if ($otype == "Dark" ) then
+   modify -s hiccd autoshut=f
+else
+   modify -s hiccd autoshut=t
+endif
+#
+waitfor -s hiccd observip = false
+echo ""
+#
+while ($NACQ  > 0 )
+#
+#
+ modify -s hiccd expose = t wait
+ echo "  Exposing `show -s hiccd frameno`  `show -s hiccd object`..."
+#
+ echo Waiting for exposure and readout to finish....
+ waitfor -s hiccd observip = false
+echo ""
+sleep 2
+#
+ @ NACQ -= 1
+#
+end
+date
+echo "Sequence complete."
+sleep 2
