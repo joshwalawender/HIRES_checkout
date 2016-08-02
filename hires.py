@@ -47,9 +47,15 @@ class HIRES(object):
         if notbusy:
             for i in range(0,n):
                 self.info('Exposing ({:d} of {:d}) ...'.format(i, n))
-                hiccd.write('EXPOSE', True)
-                self.debug('  Waiting for exposure to finish ...')
-                done = ktl.waitFor('($hiccd.OBSERVIP == false)', timeout=30)
+                exptime = float(self.hiccd.read('TTIME'))
+                self.info('  Exposure Time = {:.1f} s'.format(exptime))
+                self.info('  Object = {}'.format(
+                          self.hiccd.read('OBJECT')))
+                self.info('  Type = {}'.format(
+                          self.hiccd.read('OBSTYPE')))
+                self.hiccd.write('EXPOSE', True)
+                self.info('  Waiting for exposure to finish ...')
+                done = ktl.waitFor('($hiccd.OBSERVIP == false)', timeout=30+exptime)
                 if done:
                     self.info('  Done.')
                 else:
@@ -60,30 +66,31 @@ class HIRES(object):
         self.hiccd.write('OBJECT', 'Bias')
         self.hiccd.write('OBSTYPE', 'Bias')
         self.hiccd.write('AUTOSHUT', False)
+        self.hiccd.write('TTIME', 0)
         self.goi(n=nbiases)
 
     ##-------------------------------------------------------------------------
     ## Logging Convenience Methods
     ##-------------------------------------------------------------------------
-    def debug(msg):
+    def debug(self, msg):
         if self.logger:
             self.logger.debug(msg)
         else:
             print('  DEBUG: {}'.format(msg))
 
-    def info(msg):
+    def info(self, msg):
         if self.logger:
             self.logger.info(msg)
         else:
             print('   INFO: {}'.format(msg))
 
-    def warning(msg):
+    def warning(self, msg):
         if self.logger:
             self.logger.warning(msg)
         else:
             print('WARNING: {}'.format(msg))
 
-    def error(msg):
+    def error(self, msg):
         if self.logger:
             self.logger.error(msg)
         else:
