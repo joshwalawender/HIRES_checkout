@@ -20,7 +20,6 @@ from astropy import log
 log.setLevel('ERROR')
 # log.disable_warnings_logging()
 
-
 ##-------------------------------------------------------------------------
 ## HIRES Image Object
 ##-------------------------------------------------------------------------
@@ -44,14 +43,14 @@ class HIRESimage(object):
             self.read_fits(fits_file)
 
     def read_fits(self, fits_file):
-        if self.logger: self.logger.debug('Reading {}'.format(fits_file))
+        debug('Reading {}'.format(fits_file))
         self.b = CCDData.read(fits_file, unit=u.adu, hdu=1)
         self.g = CCDData.read(fits_file, unit=u.adu, hdu=2)
         self.r = CCDData.read(fits_file, unit=u.adu, hdu=3)
         self.header = fits.getheader(fits_file, 0)
 
     def load_from_CCDData(self, b, g, r):
-        if self.logger: self.logger.debug('Loading data from CCDData objects')
+        debug('Loading data from CCDData objects')
         self.b = b
         self.g = g
         self.r = r
@@ -77,6 +76,31 @@ class HIRESimage(object):
                                   subtract_bias(self.g, image.g),\
                                   subtract_bias(self.r, image.r))
         return biassub
+
+
+    def debug(msg):
+        if self.logger:
+            self.logger.debug(msg)
+        else:
+            print('  DEBUG: {}'.format(msg))
+
+    def info(msg):
+        if self.logger:
+            self.logger.info(msg)
+        else:
+            print('   INFO: {}'.format(msg))
+
+    def warning(msg):
+        if self.logger:
+            self.logger.warning(msg)
+        else:
+            print('WARNING: {}'.format(msg))
+
+    def error(msg):
+        if self.logger:
+            self.logger.error(msg)
+        else:
+            print('  ERROR: {}'.format(msg))
 
 
 ##-------------------------------------------------------------------------
@@ -124,41 +148,41 @@ class HIRESinstrument(object):
         '''Script to use KTL and keywords to take n bias frames and record the
         resulting filenames to a list.
         '''
-        if self.logger: self.logger.info('Taking {} bias frames'.format(nbiases))
+        info('Taking {} bias frames'.format(nbiases))
         if fake:
             ## NOTE: this assumes nbiases=10 at the moment
             nbiases = 10
-            if self.logger: self.logger.info('  Fake keyword invoked.  No data will be taken.')
-            if self.logger: self.logger.info('  Returning generic file names')
+            info('  Fake keyword invoked.  No data will be taken.')
+            info('  Returning generic file names')
             base_path = os.path.join('/', 'Volumes', 'Internal_1TB', 'HIRES_Data')
             bias_files = [os.path.join(base_path, 'hires{:04d}.fits'.format(i))\
                           for i in range(1,nbiases+1,1)]
             for bias_file in bias_files:
-                if self.logger: self.logger.debug('  Bias: {}'.format(bias_file))
+                debug('  Bias: {}'.format(bias_file))
         else:
             ## Take bias frames here
             bias_files = []
 
-        if self.logger: self.logger.info('  Obtained {} bias files'.format(len(bias_files)))
+        info('  Obtained {} bias files'.format(len(bias_files)))
         return bias_files
 
     def take_darks(self, ndarks=5, exptimes=[1, 60, 600], fake=False):
         '''Script to use KTL and keywords to take n dark frames at the
         specified exposure times and record the resulting filenames to a list.
         '''
-        if self.logger: self.logger.info('Taking dark frames')
+        info('Taking dark frames')
         if fake:
             ## NOTE: this assumes ndarks=5 and exptimes=[1, 60, 600]
             ndarks=5
             exptimes=[1, 60, 600]
-            if self.logger: self.logger.info('  Fake keyword invoked.  No data will be taken.')
-            if self.logger: self.logger.info('  Returning generic file names')
+            info('  Fake keyword invoked.  No data will be taken.')
+            info('  Returning generic file names')
             base_path = os.path.join('/', 'Volumes', 'Internal_1TB', 'HIRES_Data')
             start_index = 11
             dark_files = [os.path.join(base_path, 'hires{:04d}.fits'.format(i))\
                           for i in range(start_index,start_index+ndarks*(len(exptimes)),1)]
             for dark_file in dark_files:
-                if self.logger: self.logger.debug('  {}'.format(dark_file))
+                debug('  {}'.format(dark_file))
             return dark_files
         dark_files = []
         ## Take bias frames here
