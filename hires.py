@@ -20,6 +20,76 @@ from astropy import log
 log.setLevel('ERROR')
 # log.disable_warnings_logging()
 
+import ktl
+
+class HIRESError(Exception):
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
+
+
+##-------------------------------------------------------------------------
+## HIRES Instrument Object
+##-------------------------------------------------------------------------
+class HIRES(object):
+    def __init__(self, logger=None):
+        self.logger = logger
+        self.hires = ktl.Service('hires')
+        self.hiccd = ktl.Service('hiccd')
+        ## Set OBSERVER to "HIRES Engineering"
+        self.hiccd.write('OBSERVER', 'HIRES Engineering')
+        ## Set frame numebr to 1
+        self.hiccd.write('FRAMENO', 1)
+
+    def goi(self, n=1):
+        notbusy = ktl.waitFor('($hiccd.OBSERVIP == false)', timeout=30)
+        if notbusy:
+            for i in range(0,n):
+                self.info('Exposing ({:d} of {:d}) ...'.format(i, n))
+                hiccd.write('EXPOSE', True)
+                self.debug('  Waiting for exposure to finish ...')
+                done = ktl.waitFor('($hiccd.OBSERVIP == false)', timeout=30)
+                if done:
+                    self.info('  Done.')
+                else:
+                    self.error('Timed out waiting for exposure to finish')
+                    raise HIRESError('Timed out waiting for exposure to finish')
+
+    def take_bias(self, nbiases=1):
+        self.hiccd.write('OBJECT', 'Bias')
+        self.hiccd.write('OBSTYPE', 'Bias')
+        self.hiccd.write('AUTOSHUT', False)
+        self.goi(n=nbiases)
+
+    ##-------------------------------------------------------------------------
+    ## Logging Convenience Methods
+    ##-------------------------------------------------------------------------
+    def debug(msg):
+        if self.logger:
+            self.logger.debug(msg)
+        else:
+            print('  DEBUG: {}'.format(msg))
+
+    def info(msg):
+        if self.logger:
+            self.logger.info(msg)
+        else:
+            print('   INFO: {}'.format(msg))
+
+    def warning(msg):
+        if self.logger:
+            self.logger.warning(msg)
+        else:
+            print('WARNING: {}'.format(msg))
+
+    def error(msg):
+        if self.logger:
+            self.logger.error(msg)
+        else:
+            print('  ERROR: {}'.format(msg))
+
+
 ##-------------------------------------------------------------------------
 ## HIRES Image Object
 ##-------------------------------------------------------------------------
@@ -78,6 +148,9 @@ class HIRESimage(object):
         return biassub
 
 
+    ##-------------------------------------------------------------------------
+    ## Logging Convenience Methods
+    ##-------------------------------------------------------------------------
     def debug(msg):
         if self.logger:
             self.logger.debug(msg)
