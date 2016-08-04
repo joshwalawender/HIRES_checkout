@@ -32,11 +32,22 @@ class KeckInstrument(object):
         self.service_list = []
         self.services = {}
         self.keywords = {}
+        self.shared_keywords = []
+
 
     def get_services(self):
         for name in self.service_list:
             self.services[name] = ktl.Service(name)
             self.keywords[name] = (self.services[name]).keywords()
+        ## Find all keywords that appear in more than one service
+        allshared = []
+        for i,iname in enumerate(self.service_list):
+            for j in range(i+1,len(self.service_list)):
+                jname = self.service_list[j]
+                shared = list(set(self.keywords[iname]) & set(self.keywords[jname]))
+                allshared.extend(shared)
+        self.shared_keywords = set(allshared)
+
 
     def get(self, kw):
         kwfound = False
@@ -48,6 +59,7 @@ class KeckInstrument(object):
         if not kwfound:
             raise InstrumentError('{} not in {} related services'.format(
                   kw, self.name))
+
 
     def set(self, kw, val):
         kwfound = False
@@ -89,7 +101,6 @@ class KeckInstrument(object):
             print('  ERROR: {}'.format(msg))
 
 
-
 ##-------------------------------------------------------------------------
 ## HIRES Instrument Object
 ##-------------------------------------------------------------------------
@@ -102,8 +113,6 @@ class HIRES(KeckInstrument):
         self.service_list = ['hires', 'hiccd']
         self.name = 'HIRES'
         self.get_services()
-        self.shared_keywords = set(self.keywords['hires']) & set(self.keywords['hiccd'])
-        
         self.info('Instantiated HIRES in {} mode'.format(self.mode))
 
 
