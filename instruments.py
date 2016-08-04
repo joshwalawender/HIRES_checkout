@@ -217,3 +217,13 @@ class HIRES(KeckInstrument):
         self.set('AUTOSHUT', True)
 
 
+class HIRESr(HIRES):
+    def __init__(self, logger=None):
+        self.logger = logger
+        super(HIRESr, self).__init__(logger=self.logger, mode='Red')
+
+
+class HIRESb(HIRES):
+    def __init__(self, logger=None):
+        self.logger = logger
+        super(HIRESb, self).__init__(logger=self.logger, mode='Blue')
