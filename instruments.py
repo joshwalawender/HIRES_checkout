@@ -115,13 +115,15 @@ class HIRES(KeckInstrument):
 
         self.slits = ['B1', 'B2', 'B3', 'B4', 'B5', 'C1', 'C2', 'C3', 'C4', 'C5',
                       'D1', 'D2', 'D3', 'D4', 'D5', 'E1', 'E2', 'E3', 'E4', 'E5']
-        self.lamps = ['none', 'off', 'ThAr1', 'ThAr2', 'quartz1', 'quartz2']
+        self.lamps = ['none', 'off', 'thar1', 'thar2', 'quartz1', 'quartz2']
         self.lamp_filters = ['dt', 'ug1', 'gg495', 'bg12', 'bg14', 'ng3',
                              'clear', 'ug5', 'etalon', 'bg13', 'bg38']
         self.filters1 = ['bg24a', 'kv408', 'kv370', 'kv389', 'clear', 'rg610',
                          'og530', 'kv418', 'kv380', 'gg475', 'wg335', 'wg360']
         self.filters2 = ['cuso4', '6563/30', 'dt', 'clear', '5026/600', '6300/30',
                          'home', '3090/62', '6199/30', '5893/30']
+#         self.xdangle_range = []
+#         self.echangle_range = []
 
         self.get_services()
         self.info('Instantiated HIRES in {} mode'.format(self.mode))
@@ -200,8 +202,8 @@ class HIRES(KeckInstrument):
 
 
     def set_lamp(self, lamp):
-        assert lamp in self.lamps
-        if lamp == 'off':
+        assert lamp.lower() in self.lamps
+        if lamp.lower() == 'off':
             lamp = 'none'
         self.set('LAMPNAME', lamp)
 
@@ -228,6 +230,16 @@ class HIRES(KeckInstrument):
         self.set('TTIME', exptime)
 
 
+    def set_xdangle(self, angle):
+#         assert (float(angle) >= self.xdangle_range[0]) and (float(angle) <= self.xdangle_range[1])
+        self.set('XDANGLE', float(angle))
+
+
+    def set_echangle(self, angle):
+#         assert (float(angle) >= self.echangle_range[0]) and (float(angle) <= self.echangle_range[1])
+        self.set('ECHANGLE', float(angle))
+
+
     def take_bias(self, n=1):
         self.set('OBJECT', 'Bias')
         self.set('OBSTYPE', 'Bias')
@@ -250,6 +262,7 @@ class HIRES(KeckInstrument):
         self.set('OBJECT', 'Flat')
         self.set('OBSTYPE', 'Flat')
         self.set('AUTOSHUT', True)
+        self.set('LMIRR', 'in')
         self.set_exptime(exptime)
         self.open_covers()
         self.set_lamp(lamp)
@@ -258,6 +271,7 @@ class HIRES(KeckInstrument):
         self.set_filter2('clear')
         self.set_slit(slit)
         self.goi(n=n)
+        self.set('LMIRR', 'out')
         self.set_lamp('none')
 
 
