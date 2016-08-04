@@ -112,6 +112,17 @@ class HIRES(KeckInstrument):
         super(HIRES, self).__init__(logger=self.logger)
         self.service_list = ['hires', 'hiccd']
         self.name = 'HIRES'
+
+        self.slits = ['B1', 'B2', 'B3', 'B4', 'B5', 'C1', 'C2', 'C3', 'C4', 'C5',
+                      'D1', 'D2', 'D3', 'D4', 'D5', 'E1', 'E2', 'E3', 'E4', 'E5']
+        self.lamps = ['none', 'off', 'ThAr1', 'ThAr2', 'quartz1', 'quartz2']
+        self.lamp_filters = ['dt', 'ug1', 'gg495', 'bg12', 'bg14', 'ng3',
+                             'clear', 'ug5', 'etalon', 'bg13', 'bg38']
+        self.filters1 = ['bg24a', 'kv408', 'kv370', 'kv389', 'clear', 'rg610',
+                         'og530', 'kv418', 'kv380', 'gg475', 'wg335', 'wg360']
+        self.filters2 = ['cuso4', '6563/30', 'dt', 'clear', '5026/600', '6300/30',
+                         'home', '3090/62', '6199/30', '5893/30']
+
         self.get_services()
         self.info('Instantiated HIRES in {} mode'.format(self.mode))
 
@@ -183,11 +194,45 @@ class HIRES(KeckInstrument):
         self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
 
 
+    def set_slit(self, slit):
+        assert slit.upper() in self.slits
+        self.set('DECKNAME', slit.upper())
+
+
+    def set_lamp(self, lamp):
+        assert lamp in self.lamps
+        if lamp == 'off':
+            lamp = 'none'
+        self.set('LAMPNAME', lamp)
+
+
+    def set_lamp_filter(self, filter):
+        assert filter in self.lamp_filters
+        self.set('LFILNAME', lampfilter)
+
+
+    def set_filter1(self, filter):
+        assert filter in self.filters1
+        self.set('FIL1NAME', filter)
+
+
+    def set_filter2(self, filter):
+        assert filter in self.filters2
+        self.set('FIL2NAME', filter)
+
+
+    def set_exptime(self, exptime):
+        if type(exptime) is not int:
+            exptime = int(exptime)
+            self.warning('Exposure time must be integer.  Using {:d}'.format(exptime))
+        self.set('TTIME', exptime)
+
+
     def take_bias(self, n=1):
         self.set('OBJECT', 'Bias')
         self.set('OBSTYPE', 'Bias')
         self.set('AUTOSHUT', False)
-        self.set('TTIME', 0)
+        self.set_exptime(0)
         self.goi(n=n)
         self.set('AUTOSHUT', True)
 
@@ -196,7 +241,7 @@ class HIRES(KeckInstrument):
         self.set('OBJECT', 'Dark')
         self.set('OBSTYPE', 'Dark')
         self.set('AUTOSHUT', False)
-        self.set('TTIME', exptime)
+        self.set_exptime(exptime)
         self.goi(n=n)
         self.set('AUTOSHUT', True)
 
@@ -205,16 +250,15 @@ class HIRES(KeckInstrument):
         self.set('OBJECT', 'Flat')
         self.set('OBSTYPE', 'Flat')
         self.set('AUTOSHUT', True)
-        self.set('TTIME', exptime)
+        self.set_exptime(exptime)
         self.open_covers()
-        self.set('LAMPNAME', lamp)
-        self.set('LFILNAME', lampfilter)
-        self.set('FIL1NAME', 'clear')
-        self.set('FIL2NAME', 'clear')
-        self.set('DECKNAME', slit)
+        self.set_lamp(lamp)
+        self.set_lamp_filter(lampfilter)
+        self.set_filter1('clear')
+        self.set_filter2('clear')
+        self.set_slit(slit)
         self.goi(n=n)
-        self.set('LAMPNAME', 'none')
-        self.set('AUTOSHUT', True)
+        self.set_lamp('none')
 
 
 class HIRESr(HIRES):
