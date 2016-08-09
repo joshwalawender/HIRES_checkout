@@ -225,29 +225,10 @@ class HIRES(KeckInstrument):
                 while not done.evaluate():
                     self.print_state_change(tick=tick)
                     sleep(0.1)
-                tick2 = time.now()
-                tock2 = time.now()
-                elapsed2 = (tock2-tick2).total_seconds()
-                while not os.path.exists(outfile) and elapsed2 < 20:
-                    sleep(0.1)
-                    tock2 = time.now()
-                    elapsed2 = (tock2-tick2).total_seconds()
-                if elapsed2 > 0.1:
-                    self.debug('  Waited an additional {:.1f}s for file to appear on disk'.format(elapsed2))
                 tock = time.now()
                 elapsed = (tock-tick).total_seconds()
-                self.debug('  Elapsed Time = {:.1f}s'.format(elapsed))
-                if done:
-                    if os.path.exists(outfile):
-                        images.append(outfile)
-                        self.info('  File written to: {}'.format(outfile))
-                        self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
-                    else:
-                        self.error('Could not confirm output file was written: {}'.format(outfile))
-                        raise InstrumentError('Could not confirm output file was written: {}'.format(outfile))
-                else:
-                    self.error('Timed out waiting for exposure to finish')
-                    raise InstrumentError('Timed out waiting for exposure to finish')
+                self.info('  File will be written to: {}'.format(outfile))
+                self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
         return images
 
     def all_open(self):
