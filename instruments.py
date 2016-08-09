@@ -194,6 +194,7 @@ class HIRES(KeckInstrument):
 
 
     def goi(self, n=1):
+        images = []
         busy = bool(self.get('OBSERVIP'))
         if busy:
             self.info('Waiting for instrument ...')
@@ -238,6 +239,7 @@ class HIRES(KeckInstrument):
                 self.debug('  Elapsed Time = {:.1f}s'.format(elapsed))
                 if done:
                     if os.path.exists(outfile):
+                        images.append(outfile)
                         self.info('  File written to: {}'.format(outfile))
                         self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
                     else:
@@ -246,7 +248,7 @@ class HIRES(KeckInstrument):
                 else:
                     self.error('Timed out waiting for exposure to finish')
                     raise InstrumentError('Timed out waiting for exposure to finish')
-
+        return images
 
     def all_open(self):
         return (self.col_cover_o.evaluate()
@@ -363,8 +365,9 @@ class HIRES(KeckInstrument):
         self.set('OBSTYPE', 'Bias')
         self.set('AUTOSHUT', False)
         self.set_exptime(0)
-        self.goi(n=n)
+        images = self.goi(n=n)
         self.set('AUTOSHUT', True)
+        return images
 
 
     def take_dark(self, exptime, n=1):
@@ -372,8 +375,9 @@ class HIRES(KeckInstrument):
         self.set('OBSTYPE', 'Dark')
         self.set('AUTOSHUT', False)
         self.set_exptime(exptime)
-        self.goi(n=n)
+        images = self.goi(n=n)
         self.set('AUTOSHUT', True)
+        return images
 
 
     def take_flat(self, exptime, lamp='quartz1', lampfilter='ug5', slit='B2', n=1):
@@ -388,9 +392,10 @@ class HIRES(KeckInstrument):
         self.set_filter1('clear')
         self.set_filter2('clear')
         self.set_slit(slit)
-        self.goi(n=n)
+        images = self.goi(n=n)
         self.set('LMIRR', 'out')
         self.set_lamp('none')
+        return images
 
 
 class HIRESr(HIRES):
