@@ -7,6 +7,9 @@ import sys
 import os
 import argparse
 import logging
+import re
+from time import sleep
+from ast import literal_eval
 
 from datetime import datetime as time
 from datetime import timedelta as dt
@@ -59,6 +62,7 @@ class KeckInstrument(object):
         if not kwfound:
             raise InstrumentError('{} not in {} related services'.format(
                   kw, self.name))
+        return result
 
 
     def set(self, kw, val):
@@ -126,7 +130,67 @@ class HIRES(KeckInstrument):
 #         self.echangle_range = []
 
         self.get_services()
+        self.state = []
+        self.previous_state = []
+        ## Expressions for state of covers
+        self.col_cover_o = ktl.Expression("$hires.{0}CCVCLOS == 'not closed' and $hires.{0}CCVOPEN == 'opened'".format(self.mode[0]))
+        self.col_cover_c = ktl.Expression("$hires.{0}CCVCLOS == 'closed' and $hires.{0}CCVOPEN == 'not open'".format(self.mode[0]))
+        self.ech_cover_o = ktl.Expression("$hires.ECOVCLOS == 'not closed' and $hires.ECOVOPEN == 'opened'")
+        self.ech_cover_c = ktl.Expression("$hires.ECOVCLOS == 'closed' and $hires.ECOVOPEN == 'not open'")
+        self.xd_cover_o = ktl.Expression("$hires.XCOVCLOS == 'not closed' and $hires.XCOVOPEN == 'opened'")
+        self.xd_cover_c = ktl.Expression("$hires.XCOVCLOS == 'closed' and $hires.XCOVOPEN == 'not open'")
+        self.c1_cover_o = ktl.Expression("$hires.C1CVCLOS == 'not closed' and $hires.C1CVOPEN == 'opened'")
+        self.c1_cover_c = ktl.Expression("$hires.C1CVCLOS == 'closed' and $hires.C1CVOPEN == 'not open'")
+        self.c2_cover_o = ktl.Expression("$hires.C2CVCLOS == 'not closed' and $hires.C2CVOPEN == 'opened'")
+        self.c2_cover_c = ktl.Expression("$hires.C2CVCLOS == 'closed' and $hires.C2CVOPEN == 'not open'")
+        self.cam_cover_o = ktl.Expression("$hires.CACVCLOS == 'not closed' and $hires.CACVOPEN == 'opened'")
+        self.cam_cover_c = ktl.Expression("$hires.CACVCLOS == 'closed' and $hires.CACVOPEN == 'not open'")
+        self.dks_cover_o = ktl.Expression("$hires.DARKCLOS == 'not closed' and $hires.DARKOPEN == 'open'")
+        self.dks_cover_c = ktl.Expression("$hires.DARKCLOS == 'closed' and $hires.DARKOPEN == 'not open'")
+
         self.info('Instantiated HIRES in {} mode'.format(self.mode))
+
+
+    def get_binning(self):
+        response = self.get('BINNING')
+        Xmatch = re.search('Xbinning\s(\d+)', response)
+        Ymatch = re.search('Ybinning\s(\d+)', response)
+        if Xmatch and Ymatch:
+            xbin = int(Xmatch.group(1))
+            ybin = int(Ymatch.group(1))
+            return xbin, ybin
+        else:
+            return None, None
+
+
+    def print_state_change(self, tick=None):
+        if tick is None:
+            tick = time.now()
+        self.state = [int(literal_eval(self.get('OBSERVIP').title())),
+                      int(literal_eval(self.get('EXPOSIP').title())),
+#                       int(literal_eval(self.get('HDRCOLIP').title())),
+                      int(literal_eval(self.get('ERASEIP').title())),
+                      int(literal_eval(self.get('WCRATE').title())),
+                      int(literal_eval(self.get('WDISK').title()))]
+        if self.state != self.previous_state:
+            tock = time.now()
+            elapsed = (tock-tick).total_seconds()
+            if self.state == [1, 1, 0, 0, 0]:
+                self.debug('  {:.1f}s: {}'.format(elapsed, 'Exposing CCD'))
+            elif self.state == [1, 0, 0, 1, 0]:
+                self.debug('  {:.1f}s: {}'.format(elapsed, 'Reading Out'))
+            elif self.state == [1, 0, 0, 0, 0]:
+                pass
+#                 self.debug('  {:.1f}s: {}'.format(elapsed, 'Exposure in Progress'))
+            elif self.state == [1, 0, 0, 0, 1]:
+                self.debug('  {:.1f}s: {}'.format(elapsed, 'Writing to Disk'))
+            elif self.state == [0, 0, 0, 0, 1]:
+                self.debug('  {:.1f}s: {}'.format(elapsed, 'Writing to Disk'))
+            elif self.state == [0, 0, 0, 0, 0]:
+                self.debug('  {:.1f}s: {}'.format(elapsed, 'Done'))
+            else:
+                self.debug('  {:.1f}s: {}'.format(elapsed, self.state))
+        self.previous_state = self.state
 
 
     def goi(self, n=1):
@@ -152,48 +216,102 @@ class HIRES(KeckInstrument):
                 self.info('  Object = "{}"'.format(self.get('OBJECT')))
                 self.info('  Type = "{}"'.format(self.get('OBSTYPE')))
                 tick = time.now()
-                self.set('EXPOSE', True)
-                self.info('  Waiting for exposure to finish ...')
-                done = ktl.waitFor('($hiccd.OBSERVIP == false)', timeout=60+exptime)
                 tock = time.now()
                 elapsed = (tock-tick).total_seconds()
-                self.debug('  Elapsed Time = {:.1f}'.format(elapsed))
+                self.debug('  {:.1f}s: {}'.format(elapsed, 'Erasing CCD'))
+                self.set('EXPOSE', True)
+                done = ktl.Expression('($hiccd.OBSERVIP == false) and ($hiccd.WDISK == false)')
+                while not done.evaluate():
+                    self.print_state_change(tick=tick)
+                    sleep(0.1)
+                tick2 = time.now()
+                tock2 = time.now()
+                elapsed2 = (tock2-tick2).total_seconds()
+                while not os.path.exists(outfile) and elapsed2 < 20:
+                    sleep(0.1)
+                    tock2 = time.now()
+                    elapsed2 = (tock2-tick2).total_seconds()
+                if elapsed2 > 0.1:
+                    self.debug('  Waited an additional {:.1f}s for file to appear on disk'.format(elapsed2))
+                tock = time.now()
+                elapsed = (tock-tick).total_seconds()
+                self.debug('  Elapsed Time = {:.1f}s'.format(elapsed))
                 if done:
-                    self.info('  File written to: {}'.format(outfile))
-                    self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
+                    if os.path.exists(outfile):
+                        self.info('  File written to: {}'.format(outfile))
+                        self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
+                    else:
+                        self.error('Could not confirm output file was written: {}'.format(outfile))
+                        raise InstrumentError('Could not confirm output file was written: {}'.format(outfile))
                 else:
                     self.error('Timed out waiting for exposure to finish')
                     raise InstrumentError('Timed out waiting for exposure to finish')
 
 
+    def all_open(self):
+        return (self.col_cover_o.evaluate()
+                and self.ech_cover_o.evaluate()
+                and self.xd_cover_o.evaluate()
+                and self.c1_cover_o.evaluate()
+                and self.c2_cover_o.evaluate()
+                and self.cam_cover_o.evaluate()
+                and self.dks_cover_o.evaluate()
+                and not self.col_cover_c.evaluate()
+                and not self.ech_cover_c.evaluate()
+                and not self.xd_cover_c.evaluate()
+                and not self.c1_cover_c.evaluate()
+                and not self.c2_cover_c.evaluate()
+                and not self.cam_cover_c.evaluate()
+                and not self.dks_cover_c.evaluate())
+
+
+    def all_closed(self):
+        return (self.col_cover_c.evaluate()
+                and self.ech_cover_c.evaluate()
+                and self.xd_cover_c.evaluate()
+                and self.c1_cover_c.evaluate()
+                and self.c2_cover_c.evaluate()
+                and self.cam_cover_c.evaluate()
+                and self.dks_cover_c.evaluate()
+                and not self.col_cover_o.evaluate()
+                and not self.ech_cover_o.evaluate()
+                and not self.xd_cover_o.evaluate()
+                and not self.c1_cover_o.evaluate()
+                and not self.c2_cover_o.evaluate()
+                and not self.cam_cover_o.evaluate()
+                and not self.dks_cover_o.evaluate())
+
+
     def open_covers(self):
-        tick = time.now()
-        self.info('Opening {} covers'.format(self.mode))
-        self.set('{}COCOVER'.format(mode[0].upper()), 'open')
-        self.set('ECHCOVER', 'open')
-        self.set('XDCOVER', 'open')
-        self.set('CO1COVER', 'open')
-        self.set('CO2COVER', 'open')
-        self.set('CAMCOVER', 'open')
-        self.set('DARKSLID', 'open')
-        tock = time.now()
-        elapsed = (tock-tick).total_seconds()
-        self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
+        if not self.all_open():
+            tick = time.now()
+            self.info('Opening {} covers'.format(self.mode))
+            self.set('{}COCOVER'.format(self.mode[0].upper()), 'open')
+            self.set('ECHCOVER', 'open')
+            self.set('XDCOVER', 'open')
+            self.set('CO1COVER', 'open')
+            self.set('CO2COVER', 'open')
+            self.set('CAMCOVER', 'open')
+            self.set('DARKSLID', 'open')
+            tock = time.now()
+            elapsed = (tock-tick).total_seconds()
+            self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
 
 
     def close_covers(self):
-        tick = time.now()
-        self.info('Closing {} covers'.format(self.mode))
-        self.set('{}COCOVER'.format(mode[0].upper()), 'close')
-        self.set('ECHCOVER', 'close')
-        self.set('XDCOVER', 'close')
-        self.set('CO1COVER', 'close')
-        self.set('CO2COVER', 'close')
-        self.set('CAMCOVER', 'close')
-        self.set('DARKSLID', 'close')
-        tock = time.now()
-        elapsed = (tock-tick).total_seconds()
-        self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
+        if not self.all_closed():
+            tick = time.now()
+            self.info('Closing {} covers'.format(self.mode))
+            self.set('{}COCOVER'.format(self.mode[0].upper()), 'closed')
+            self.set('ECHCOVER', 'closed')
+            self.set('XDCOVER', 'closed')
+            self.set('CO1COVER', 'closed')
+            self.set('CO2COVER', 'closed')
+            self.set('CAMCOVER', 'closed')
+            self.set('DARKSLID', 'closed')
+            tock = time.now()
+            elapsed = (tock-tick).total_seconds()
+            self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
 
 
     def set_slit(self, slit):
@@ -208,8 +326,8 @@ class HIRES(KeckInstrument):
         self.set('LAMPNAME', lamp)
 
 
-    def set_lamp_filter(self, filter):
-        assert filter in self.lamp_filters
+    def set_lamp_filter(self, lampfilter):
+        assert lampfilter in self.lamp_filters
         self.set('LFILNAME', lampfilter)
 
 
