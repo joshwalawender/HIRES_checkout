@@ -1,4 +1,4 @@
-#!/usr/env/python
+#!kpython
 
 from __future__ import division, print_function
 
@@ -23,7 +23,8 @@ from astropy import log
 log.setLevel('ERROR')
 # log.disable_warnings_logging()
 
-from hires import HIRESinstrument, HIRESimage, HIREScombine
+from instruments import HIRES
+from images import HIRESimage, HIREScombine
 
 ##-------------------------------------------------------------------------
 ## Main Program
@@ -70,15 +71,15 @@ def main():
 #     LogFileHandler.setFormatter(LogFormat)
 #     logger.addHandler(LogFileHandler)
 
-    hires = HIRESinstrument(logger=logger)
+    hires = HIRES(logger=logger)
 
     ##-------------------------------------------------------------------------
     ## Determine Read Noise
     ##-------------------------------------------------------------------------
-    clipping_sigma = 7
-    clipping_iters = 3
-    nbiases = 10
-    bias_files = hires.take_biases(nbiases=nbiases, fake=args.fake)
+    clipping_sigma = 5
+    clipping_iters = 1
+    nbiases = 3
+    bias_files = hires.take_bias(n=nbiases)
     nbiases = len(bias_files)
     ## First bias frame is the reference
     bias = HIRESimage(fits_file=bias_files[0], logger=logger)
@@ -92,10 +93,8 @@ def main():
     
     ## Create master bias from next n-1 frames
     logger.info('Reading bias frames for creating master bias')
-    image_list = []
-    for i,bias_file in enumerate(bias_files):
-        if i != 0:
-            image_list.append(HIRESimage(fits_file=bias_file, logger=logger))
+    image_list = [HIRESimage(fits_file=bias_file, logger=logger)
+                  for bias_file in bias_files if bias_file != bias_files[0]]
     logger.info('Combining {} files to make master bias'.format(len(image_list)))
     master_bias = HIREScombine(image_list, combine='median', logger=logger)
     master_bias.calculate_stats(sigma=clipping_sigma, iters=clipping_iters)
@@ -224,6 +223,8 @@ def main():
     logger.info('  Done.')
 
 
+    sys.exit(0)
+
     ##-------------------------------------------------------------------------
     ## Determine Dark Current
     ##-------------------------------------------------------------------------
@@ -231,7 +232,10 @@ def main():
     exptimes=[1, 60, 600]
     clipping_sigma = 5
     clipping_iters = 3
-    dark_files = hires.take_darks(ndarks=ndarks, exptimes=exptimes, fake=args.fake)
+    dark_files = []
+    for exptime in exptimes:
+        new_files = hires.take_darks(n=ndarks, exptimes=exptimes)
+        dark_files.extend(new_files)
     dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev'),\
                        dtype=('a64', 'f4', 'a4', 'f4', 'f4', 'f4'))
     logger.info('Analyzing bias subtracted dark frames to measure dark current.')
