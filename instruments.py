@@ -17,6 +17,7 @@ from datetime import timedelta as dt
 import numpy as np
 
 import ktl
+from ktl.Exceptions import ktlError
 
 class InstrumentError(Exception):
     def __init__(self, value):
@@ -56,8 +57,18 @@ class KeckInstrument(object):
         kwfound = False
         for name in self.services.keys():
             if kw in self.services[name].keywords():
-                result = (self.services[name]).read(kw)
-                kwfound = True
+                try:
+                    result = (self.services[name]).read(kw)
+                    kwfound = True
+                except ktlError as e:
+                    self.warning(e)
+                    self.warning('Trying again')
+                    try:
+                        result = (self.services[name]).read(kw)
+                        kwfound = True
+                    except ktlError as e:
+                        self.error(e)
+                        raise
                 break
         if not kwfound:
             raise InstrumentError('{} not in {} related services'.format(
@@ -69,8 +80,18 @@ class KeckInstrument(object):
         kwfound = False
         for name in self.services.keys():
             if kw in self.services[name].keywords():
-                (self.services[name]).write(kw, val)
-                kwfound = True
+                try:
+                    (self.services[name]).write(kw, val)
+                    kwfound = True
+                except ktlError as e:
+                    self.warning(e)
+                    self.warning('Trying again')
+                    try:
+                        (self.services[name]).write(kw, val)
+                        kwfound = True
+                    except ktlError as e:
+                        self.error(e)
+                        raise
                 break
         if not kwfound:
             raise InstrumentError('{} not in {} related services'.format(
@@ -220,14 +241,16 @@ class HIRES(KeckInstrument):
                 tock = time.now()
                 elapsed = (tock-tick).total_seconds()
                 self.debug('  {:.1f}s: {}'.format(elapsed, 'Erasing CCD'))
-                self.set('EXPOSE', True)
                 done = ktl.Expression('($hiccd.OBSERVIP == false) and ($hiccd.WDISK == false)')
+                self.set('EXPOSE', True)
                 while not done.evaluate():
                     self.print_state_change(tick=tick)
                     sleep(0.1)
+                sleep(1.0) # time shim :(
                 tock = time.now()
                 elapsed = (tock-tick).total_seconds()
                 self.info('  File will be written to: {}'.format(outfile))
+                images.append(outfile)
                 self.info('  Done ({:.1f} s elapsed)'.format(elapsed))
         return images
 
