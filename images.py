@@ -48,7 +48,7 @@ class HIRESimage(object):
 
 
     def read_fits(self, fits_file):
-        debug('Reading {}'.format(fits_file))
+        self.debug('Reading {}'.format(fits_file))
         self.b = CCDData.read(fits_file, unit=u.adu, hdu=1)
         self.g = CCDData.read(fits_file, unit=u.adu, hdu=2)
         self.r = CCDData.read(fits_file, unit=u.adu, hdu=3)
@@ -56,7 +56,7 @@ class HIRESimage(object):
 
 
     def load_from_CCDData(self, b, g, r):
-        debug('Loading data from CCDData objects')
+        self.debug('Loading data from CCDData objects')
         self.b = b
         self.g = g
         self.r = r
@@ -88,28 +88,28 @@ class HIRESimage(object):
     ##-------------------------------------------------------------------------
     ## Logging Convenience Methods
     ##-------------------------------------------------------------------------
-    def debug(msg):
+    def debug(self, msg):
         if self.logger:
             self.logger.debug(msg)
         else:
             print('  DEBUG: {}'.format(msg))
 
 
-    def info(msg):
+    def info(self, msg):
         if self.logger:
             self.logger.info(msg)
         else:
             print('   INFO: {}'.format(msg))
 
 
-    def warning(msg):
+    def warning(self, msg):
         if self.logger:
             self.logger.warning(msg)
         else:
             print('WARNING: {}'.format(msg))
 
 
-    def error(msg):
+    def error(self, msg):
         if self.logger:
             self.logger.error(msg)
         else:
