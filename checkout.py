@@ -40,39 +40,14 @@ def get_mode(im):
     hist, bins = np.histogram(im.data.ravel(), bins=bins)
     centers = (bins[:-1] + bins[1:]) / 2
     w = np.argmax(hist)
-    mode = int(centers[w]) * u.adu
+    mode = int(centers[w])
     return mode
 
 
 ##-------------------------------------------------------------------------
 ## Main Program
 ##-------------------------------------------------------------------------
-def main():
-
-    ##-------------------------------------------------------------------------
-    ## Parse Command Line Arguments
-    ##-------------------------------------------------------------------------
-    ## create a parser object for understanding command-line arguments
-    parser = argparse.ArgumentParser(
-             description="Program description.")
-    ## add flags
-    parser.add_argument("-v", "--verbose",
-        action="store_true", dest="verbose",
-        default=False, help="Be verbose! (default = False)")
-    parser.add_argument("--fake",
-        action="store_true", dest="fake",
-        default=True, help="Use test data, do not take new images.")
-    parser.add_argument("--noplots",
-        action="store_true", dest="noplots",
-        default=False, help="Do not make plots.")
-    ## add arguments
-    parser.add_argument(
-        type=str, dest="input",
-        help="A text file which contains the list of files to use in the analysis.")
-    args = parser.parse_args()
-
-    plots = not args.noplots
-
+def check_bias_and_dark(input, plots=True, verbose=False):
     ##-------------------------------------------------------------------------
     ## Create logger object
     ##-------------------------------------------------------------------------
@@ -80,7 +55,7 @@ def main():
     logger.setLevel(logging.DEBUG)
     ## Set up console output
     LogConsoleHandler = logging.StreamHandler()
-    if args.verbose:
+    if verbose:
         LogConsoleHandler.setLevel(logging.DEBUG)
     else:
         LogConsoleHandler.setLevel(logging.INFO)
@@ -98,8 +73,8 @@ def main():
     ##-------------------------------------------------------------------------
     ## Sort Input Files
     ##-------------------------------------------------------------------------
-    assert os.path.exists(args.input)
-    with open(args.input, 'r') as FO:
+    assert os.path.exists(input)
+    with open(input, 'r') as FO:
         contents = FO.read()
     files = [line.strip('\n') for line in contents.split('\n') if line != '']
 
@@ -136,7 +111,7 @@ def main():
                                              iters=clipping_iters) * u.adu
                 mode = get_mode(bias)
                 logger.debug('  Bias ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
-                             chip, mean, median, mode, stddev))
+                             chip, mean.value, median.value, mode, stddev.value))
             else:
                 biases.append(ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip))
         logger.debug('  Making master bias')
@@ -147,7 +122,7 @@ def main():
                                      iters=clipping_iters) * u.adu
         mode = get_mode(master_bias)
         logger.debug('  Master Bias ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
-                     chip, mean, median, mode, stddev))
+                     chip, mean.value, median.value, mode, stddev.value))
 
         diff = bias.subtract(master_bias)
         mean, median, stddev = stats.sigma_clipped_stats(diff.data,
@@ -155,7 +130,7 @@ def main():
                                      iters=clipping_iters) * u.adu
         mode = get_mode(diff)
         logger.debug('  Bias Difference ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
-                     chip, mean, median, mode, stddev))
+                     chip, mean.value, median.value, mode, stddev.value))
         RN = stddev / np.sqrt(1.+1./(nbiases-1))
         logger.info('Read Noise (ext={:d}) is {:.2f}'.format(chip, RN))
 
@@ -202,8 +177,8 @@ def main():
     plt.figure(figsize=(9,15), dpi=72)
     binsize = 1.0
 
-    dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev'),\
-                       dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4'))
+    dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'nhotpix'),\
+                       dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4', 'i4'))
     logger.info('Analyzing bias subtracted dark frames to measure dark current.')
     logger.info('  Determining image statistics of each dark using sigma clipping algorithm.')
     logger.info('    sigma={:d}, iters={:d}'.format(clipping_sigma, clipping_iters))
@@ -217,25 +192,33 @@ def main():
             mean, median, stddev = stats.sigma_clipped_stats(dark_diff.data,
                                          sigma=clipping_sigma,
                                          iters=clipping_iters) * u.adu
-            dark_table.add_row([dark_file, exptime, chip, mean, median, stddev])
+            thresh = 0.2*exptime # hot pixel defined as dark current of 0.2 ADU/s
+            nhotpix = len(dark_diff.data.ravel()[dark_diff.data.ravel() > thresh])
+            dark_table.add_row([dark_file, exptime, chip, mean, median, stddev, nhotpix])
 
     logger.info('  Fitting line to levels as a function of exposure time')
     line = models.Linear1D(intercept=0, slope=0)
     line.intercept.fixed = True
     fitter = fitting.LinearLSQFitter()
     dc_fit = {}
+
+    longest_exptime = int(max(dark_table['exptime']))
+    long_dark_table = dark_table[np.array(dark_table['exptime'], dtype=int) == longest_exptime]
+
     for chip in [1,2,3]:
         dc_fit[chip] = fitter(line, dark_table[dark_table['chip'] == chip]['exptime'],\
                               dark_table[dark_table['chip'] == chip]['mean'])
-        logger.info('Dark Current (ext={:d}) = {:.2f} ADU/600s'.format(chip,
-                    dc_fit[chip].slope.value*600.))
+        thischip = long_dark_table[long_dark_table['chip'] == chip]
+        nhotpix = np.mean(thischip['nhotpix'])
+        logger.info('Dark Current (ext={:d}) = {:.2f} ADU/600s with {:.0f} hot pixels'.format(chip,
+                    dc_fit[chip].slope.value*600., nhotpix))
 
     if plots:
         ##-------------------------------------------------------------------------
         ## Plot Dark Frame Levels
         ##-------------------------------------------------------------------------
         logger.info('Generating figure with dark current fits')
-        plt.figure(figsize=(9,15), dpi=72)
+        plt.figure(figsize=(15,9), dpi=72)
         ax = plt.subplot(111)
         ax.plot(dark_table[dark_table['chip'] == 1]['exptime'],\
                 dark_table[dark_table['chip'] == 1]['mean'],\
@@ -263,12 +246,12 @@ def main():
                 label='mean count level in ADU (R)',\
                 alpha=1.0)
         ax.plot([0, 1000],\
-                [dc_fit[2](0), dc_fit[2](1000)],\
+                [dc_fit[3](0), dc_fit[3](1000)],\
                 'r-',\
                 label='dark current (R) = {:.2f} ADU/600s'.format(dc_fit[3].slope.value*600.),\
                 alpha=0.3)
         ax.legend(loc='best', fontsize=10)
-        plt.xlim(0, 1.1*max(dark_table['exptime']))
+        plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
         plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
         ax.set_xlabel('Exposure Time (s)')
         ax.set_ylabel('Dark Level (ADU)')
@@ -288,4 +271,25 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    ##-------------------------------------------------------------------------
+    ## Parse Command Line Arguments
+    ##-------------------------------------------------------------------------
+    ## create a parser object for understanding command-line arguments
+    parser = argparse.ArgumentParser(
+             description="Program description.")
+    ## add flags
+    parser.add_argument("-v", "--verbose",
+        action="store_true", dest="verbose",
+        default=False, help="Be verbose! (default = False)")
+    parser.add_argument("--noplots",
+        action="store_true", dest="noplots",
+        default=False, help="Do not make plots.")
+    ## add arguments
+    parser.add_argument(
+        type=str, dest="input",
+        help="A text file which contains the list of files to use in the analysis.")
+    args = parser.parse_args()
+
+    plots = not args.noplots
+
+    check_bias_and_dark(args.input, plots=plots, verbose=args.verbose)
