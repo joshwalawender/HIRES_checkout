@@ -45,35 +45,14 @@ def get_mode(im):
 
 
 ##-------------------------------------------------------------------------
-## Main Program
+## Sort Input Files
 ##-------------------------------------------------------------------------
-def check_bias_and_dark(input, plots=True, verbose=False):
-    ##-------------------------------------------------------------------------
-    ## Create logger object
-    ##-------------------------------------------------------------------------
-    logger = logging.getLogger('MyLogger')
-    logger.setLevel(logging.DEBUG)
-    ## Set up console output
-    LogConsoleHandler = logging.StreamHandler()
-    if verbose:
-        LogConsoleHandler.setLevel(logging.DEBUG)
-    else:
-        LogConsoleHandler.setLevel(logging.INFO)
-    LogFormat = logging.Formatter('%(asctime)s %(levelname)8s: %(message)s',
-                                  datefmt='%Y%m%d %H:%M:%S')
-    LogConsoleHandler.setFormatter(LogFormat)
-    logger.addHandler(LogConsoleHandler)
-    ## Set up file output
-#     LogFileName = None
-#     LogFileHandler = logging.FileHandler(LogFileName)
-#     LogFileHandler.setLevel(logging.DEBUG)
-#     LogFileHandler.setFormatter(LogFormat)
-#     logger.addHandler(LogFileHandler)
-
-    ##-------------------------------------------------------------------------
-    ## Sort Input Files
-    ##-------------------------------------------------------------------------
+def get_file_list(input):
+    '''
+    
+    '''
     assert os.path.exists(input)
+    
     with open(input, 'r') as FO:
         contents = FO.read()
     files = [line.strip('\n') for line in contents.split('\n') if line != '']
@@ -87,9 +66,17 @@ def check_bias_and_dark(input, plots=True, verbose=False):
         elif hdr.get('OBSTYPE').strip() == 'Dark':
             dark_files.append(file)
 
-    ##-------------------------------------------------------------------------
-    ## Determine Read Noise
-    ##-------------------------------------------------------------------------
+    dict = {'bias': bias_files, 'dark': dark_files}
+
+    return dict
+
+
+##-------------------------------------------------------------------------
+## Determine Read Noise
+##-------------------------------------------------------------------------
+def read_noise(bias_files, plots=False, logger=None):
+    '''
+    '''
     nbiases = len(bias_files)
     clipping_sigma = 5
     clipping_iters = 1
@@ -97,6 +84,7 @@ def check_bias_and_dark(input, plots=True, verbose=False):
         plt.figure(figsize=(9,15), dpi=72)
         binsize = 1.0
     master_biases = {}
+    read_noise = []
     for chip in [1,2,3]:
         logger.info('Analyzing Chip {:d}'.format(chip))
         if plots:
@@ -132,6 +120,7 @@ def check_bias_and_dark(input, plots=True, verbose=False):
         logger.debug('  Bias Difference ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
                      chip, mean.value, median.value, mode, stddev.value))
         RN = stddev / np.sqrt(1.+1./(nbiases-1))
+        read_noise.append(RN)
         logger.info('Read Noise (ext={:d}) is {:.2f}'.format(chip, RN))
 
         ##---------------------------------------------------------------------
@@ -167,10 +156,14 @@ def check_bias_and_dark(input, plots=True, verbose=False):
         plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
         plt.close()
 
+    return read_noise, master_biases
 
-    ##-------------------------------------------------------------------------
-    ## Determine Dark Current
-    ##-------------------------------------------------------------------------
+
+
+##-------------------------------------------------------------------------
+## Determine Dark Current
+##-------------------------------------------------------------------------
+def dark_current(dark_files, master_biases, plots=False, logger=None):
     ndarks = len(dark_files)
     clipping_sigma = 5
     clipping_iters = 1
@@ -185,7 +178,7 @@ def check_bias_and_dark(input, plots=True, verbose=False):
 
     for dark_file in dark_files:
         hdr = fits.getheader(dark_file, 0)
-        exptime = float(hdr['EXPTIME'])
+        exptime = float(hdr['DARKTIME'])
         for chip in [1,2,3]:
             dark = ccdproc.fits_ccddata_reader(dark_file, unit='adu', hdu=chip)
             dark_diff = ccdproc.subtract_bias(dark, master_biases[chip])
@@ -205,6 +198,7 @@ def check_bias_and_dark(input, plots=True, verbose=False):
     longest_exptime = int(max(dark_table['exptime']))
     long_dark_table = dark_table[np.array(dark_table['exptime'], dtype=int) == longest_exptime]
 
+    dark_stats = []
     for chip in [1,2,3]:
         dc_fit[chip] = fitter(line, dark_table[dark_table['chip'] == chip]['exptime'],\
                               dark_table[dark_table['chip'] == chip]['mean'])
@@ -212,6 +206,7 @@ def check_bias_and_dark(input, plots=True, verbose=False):
         nhotpix = np.mean(thischip['nhotpix'])
         logger.info('Dark Current (ext={:d}) = {:.2f} ADU/600s with {:.0f} hot pixels'.format(chip,
                     dc_fit[chip].slope.value*600., nhotpix))
+        dark_stats.append([dc_fit[chip].slope.value*600., nhotpix])
 
     if plots:
         ##-------------------------------------------------------------------------
@@ -269,6 +264,9 @@ def check_bias_and_dark(input, plots=True, verbose=False):
         plt.close()
         logger.info('  Done.')
 
+    return dark_stats
+
+
 
 if __name__ == '__main__':
     ##-------------------------------------------------------------------------
@@ -292,4 +290,31 @@ if __name__ == '__main__':
 
     plots = not args.noplots
 
-    check_bias_and_dark(args.input, plots=plots, verbose=args.verbose)
+    ##-------------------------------------------------------------------------
+    ## Create logger object
+    ##-------------------------------------------------------------------------
+    logger = logging.getLogger('MyLogger')
+    logger.setLevel(logging.DEBUG)
+    ## Set up console output
+    LogConsoleHandler = logging.StreamHandler()
+    if args.verbose:
+        LogConsoleHandler.setLevel(logging.DEBUG)
+    else:
+        LogConsoleHandler.setLevel(logging.INFO)
+    LogFormat = logging.Formatter('%(asctime)s %(levelname)8s: %(message)s',
+                                  datefmt='%Y%m%d %H:%M:%S')
+    LogConsoleHandler.setFormatter(LogFormat)
+    logger.addHandler(LogConsoleHandler)
+    ## Set up file output
+#     LogFileName = None
+#     LogFileHandler = logging.FileHandler(LogFileName)
+#     LogFileHandler.setLevel(logging.DEBUG)
+#     LogFileHandler.setFormatter(LogFormat)
+#     logger.addHandler(LogFileHandler)
+
+
+    lists = get_file_list(args.input)
+    RN, master_biases = read_noise(lists['bias'], plots=plots, logger=logger)
+    print(RN)
+    DC = dark_current(lists['dark'], master_biases, plots=plots, logger=logger)
+    print(DC)
