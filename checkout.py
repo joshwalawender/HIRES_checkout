@@ -74,7 +74,7 @@ def get_file_list(input):
 ##-------------------------------------------------------------------------
 ## Determine Read Noise
 ##-------------------------------------------------------------------------
-def read_noise(bias_files, plots=False, logger=None):
+def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
     '''
     '''
     nbiases = len(bias_files)
@@ -84,8 +84,8 @@ def read_noise(bias_files, plots=False, logger=None):
         plt.figure(figsize=(9,15), dpi=72)
         binsize = 1.0
     master_biases = {}
-    read_noise = []
-    for chip in [1,2,3]:
+    read_noise = {}
+    for chip in chips:
         logger.info('Analyzing Chip {:d}'.format(chip))
         if plots:
             ax = plt.subplot(3,1,chip)
@@ -93,12 +93,13 @@ def read_noise(bias_files, plots=False, logger=None):
         for bias_file in bias_files:
             logger.debug('  Reading {}'.format(bias_file))
             if bias_file == bias_files[0]:
-                bias = ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip)
-                mean, median, stddev = stats.sigma_clipped_stats(bias.data,
+                bias0 = ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip)
+                mean, median, stddev = stats.sigma_clipped_stats(bias0.data,
                                              sigma=clipping_sigma,
                                              iters=clipping_iters) * u.adu
-                mode = get_mode(bias)
-                logger.debug('  Bias ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
+                mode = get_mode(bias0)
+                logger.debug('  Bias[{:d}] (mean, med, mode, std) = '\
+                             '{:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
                              chip, mean.value, median.value, mode, stddev.value))
             else:
                 biases.append(ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip))
@@ -109,19 +110,22 @@ def read_noise(bias_files, plots=False, logger=None):
                                      sigma=clipping_sigma,
                                      iters=clipping_iters) * u.adu
         mode = get_mode(master_bias)
-        logger.debug('  Master Bias ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
+        logger.debug('  Master Bias[{:d}] (mean, med, mode, std) = '\
+                     '{:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
                      chip, mean.value, median.value, mode, stddev.value))
 
-        diff = bias.subtract(master_bias)
+        diff = bias0.subtract(master_bias)
         mean, median, stddev = stats.sigma_clipped_stats(diff.data,
                                      sigma=clipping_sigma,
                                      iters=clipping_iters) * u.adu
         mode = get_mode(diff)
-        logger.debug('  Bias Difference ext={:d} (mean, median, mode, stddev) = {:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
+        logger.debug('  Bias Difference[{:d}] (mean, med, mode, std) = '\
+                     '{:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
                      chip, mean.value, median.value, mode, stddev.value))
         RN = stddev / np.sqrt(1.+1./(nbiases-1))
-        read_noise.append(RN)
-        logger.info('Read Noise (ext={:d}) is {:.2f}'.format(chip, RN))
+        read_noise[chip] = RN
+        logger.info('For chip #{:d}:'.format(chip))
+        logger.info('  Read Noise is {:.2f}'.format(RN))
 
         ##---------------------------------------------------------------------
         ## Plot Bias Frame Histograms
@@ -137,13 +141,16 @@ def read_noise(bias_files, plots=False, logger=None):
                                          mean=mean,\
                                          stddev=RN)
             gaussian_plot = [gaussian(x) for x in centers]
-            plt.bar(centers, hist,\
-                    align='center', width=0.7*binsize, log=True, color='b', alpha=0.5,\
+            plt.bar(centers, hist,
+                    align='center', width=0.7*binsize, log=True, color='b',
+                    alpha=0.5,
                     label='Blue CCD Pixel Count Histogram')
             plt.plot(centers, gaussian_plot, 'b-', alpha=0.8,\
                      label='Gaussian with sigma = {:.2f}'.format(RN))
-            plt.plot([mean.value, mean.value], [1, 2*max(hist)], label='Mean Pixel Value')
-            plt.xlim(np.floor(mean.value-7.*RN.value), np.ceil(mean.value+7.*RN.value))
+            plt.plot([mean.value, mean.value], [1, 2*max(hist)],
+                     label='Mean Pixel Value')
+            plt.xlim(np.floor(mean.value-7.*RN.value),
+                     np.ceil(mean.value+7.*RN.value))
             plt.ylim(1, 2*max(hist))
             ax.set_xlabel('Counts (ADU)', fontsize=10)
             ax.set_ylabel('Number of Pixels', fontsize=10)
@@ -163,8 +170,9 @@ def read_noise(bias_files, plots=False, logger=None):
 ##-------------------------------------------------------------------------
 ## Determine Dark Current
 ##-------------------------------------------------------------------------
-def dark_current(dark_files, master_biases, plots=False, logger=None):
+def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
     ndarks = len(dark_files)
+    hpthresh = 0.2   # hot pixel defined as dark current of 0.2 ADU/s
     clipping_sigma = 5
     clipping_iters = 1
     plt.figure(figsize=(9,15), dpi=72)
@@ -173,19 +181,20 @@ def dark_current(dark_files, master_biases, plots=False, logger=None):
     dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'nhotpix'),\
                        dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4', 'i4'))
     logger.info('Analyzing bias subtracted dark frames to measure dark current.')
-    logger.info('  Determining image statistics of each dark using sigma clipping algorithm.')
+    logger.info('  Determining image statistics of each dark using sigma clipping.')
     logger.info('    sigma={:d}, iters={:d}'.format(clipping_sigma, clipping_iters))
+    logger.info('  Hot pixels defines as pixels with dark current > {:.2f} ADU/s'.format(hpthresh))
 
     for dark_file in dark_files:
         hdr = fits.getheader(dark_file, 0)
         exptime = float(hdr['DARKTIME'])
-        for chip in [1,2,3]:
+        for chip in chips:
             dark = ccdproc.fits_ccddata_reader(dark_file, unit='adu', hdu=chip)
             dark_diff = ccdproc.subtract_bias(dark, master_biases[chip])
             mean, median, stddev = stats.sigma_clipped_stats(dark_diff.data,
                                          sigma=clipping_sigma,
                                          iters=clipping_iters) * u.adu
-            thresh = 0.2*exptime # hot pixel defined as dark current of 0.2 ADU/s
+            thresh = hpthresh*exptime # hot pixel defined as dark current of 0.2 ADU/s
             nhotpix = len(dark_diff.data.ravel()[dark_diff.data.ravel() > thresh])
             dark_table.add_row([dark_file, exptime, chip, mean, median, stddev, nhotpix])
 
@@ -198,20 +207,23 @@ def dark_current(dark_files, master_biases, plots=False, logger=None):
     longest_exptime = int(max(dark_table['exptime']))
     long_dark_table = dark_table[np.array(dark_table['exptime'], dtype=int) == longest_exptime]
 
-    dark_stats = []
-    for chip in [1,2,3]:
+    dark_stats = {}
+    for chip in chips:
         dc_fit[chip] = fitter(line, dark_table[dark_table['chip'] == chip]['exptime'],\
                               dark_table[dark_table['chip'] == chip]['mean'])
+        dark_current = dc_fit[chip].slope.value * u.adu/u.second
         thischip = long_dark_table[long_dark_table['chip'] == chip]
-        nhotpix = np.mean(thischip['nhotpix'])
-        logger.info('Dark Current (ext={:d}) = {:.2f} ADU/600s with {:.0f} hot pixels'.format(chip,
-                    dc_fit[chip].slope.value*600., nhotpix))
-        dark_stats.append([dc_fit[chip].slope.value*600., nhotpix])
+        nhotpix = int(np.mean(thischip['nhotpix']))
+        nhotpixstd = int(np.std(thischip['nhotpix']))
+        logger.info('For chip #{:d}:'.format(chip))
+        logger.info('  Dark Current = {:.2f} ADU/600s'.format(dark_current.value*600.))
+        logger.info('  Found {:d} +/- {:d} hot pixels'.format(nhotpix, nhotpixstd))
+        dark_stats[chip] = [dark_current, nhotpix, nhotpixstd]
 
+    ##-------------------------------------------------------------------------
+    ## Plot Dark Frame Levels
+    ##-------------------------------------------------------------------------
     if plots:
-        ##-------------------------------------------------------------------------
-        ## Plot Dark Frame Levels
-        ##-------------------------------------------------------------------------
         logger.info('Generating figure with dark current fits')
         plt.figure(figsize=(15,9), dpi=72)
         ax = plt.subplot(111)
@@ -314,7 +326,7 @@ if __name__ == '__main__':
 
 
     lists = get_file_list(args.input)
-    RN, master_biases = read_noise(lists['bias'], plots=plots, logger=logger)
+    RN, master_biases = read_noise(lists['bias'], plots=plots, logger=logger, chips=[1])
     print(RN)
-    DC = dark_current(lists['dark'], master_biases, plots=plots, logger=logger)
+    DC = dark_current(lists['dark'], master_biases, plots=plots, logger=logger, chips=[1])
     print(DC)
