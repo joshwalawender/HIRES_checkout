@@ -94,7 +94,7 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
             ax = plt.subplot(3,1,chip)
         biases = []
         for bias_file in bias_files:
-            logger.debug('  Reading {}'.format(bias_file))
+            logger.debug('  Reading bias: {}[{}]'.format(bias_file, chip))
             if bias_file == bias_files[0]:
                 bias0 = ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip)
                 mean, median, stddev = stats.sigma_clipped_stats(bias0.data,
@@ -113,9 +113,9 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
                                      sigma=clipping_sigma,
                                      iters=clipping_iters) * u.adu
         mode = get_mode(master_bias)
-        logger.debug('  Master Bias[{:d}] (mean, med, mode, std) = '\
-                     '{:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
-                     chip, mean.value, median.value, mode, stddev.value))
+        logger.info('  Master Bias[{:d}] (mean, med, mode, std) = '\
+                    '{:.1f}, {:.1f}, {:d}, {:.2f}'.format(\
+                    chip, mean.value, median.value, mode, stddev.value))
 
         diff = bias0.subtract(master_bias)
         mean, median, stddev = stats.sigma_clipped_stats(diff.data,
@@ -152,8 +152,8 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
                      label='Gaussian with sigma = {:.2f}'.format(RN))
             plt.plot([mean.value, mean.value], [1, 2*max(hist)],
                      label='Mean Pixel Value')
-            plt.xlim(np.floor(mean.value-7.*RN.value),
-                     np.ceil(mean.value+7.*RN.value))
+            plt.xlim(np.floor(mean.value-15.*RN.value),
+                     np.ceil(mean.value+15.*RN.value))
             plt.ylim(1, 2*max(hist))
             ax.set_xlabel('Counts (ADU)', fontsize=10)
             ax.set_ylabel('Number of Pixels', fontsize=10)
@@ -192,6 +192,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
         hdr = fits.getheader(dark_file, 0)
         exptime = float(hdr['DARKTIME'])
         for chip in chips:
+            logger.debug('  Reading dark: {}[{}]'.format(dark_file, chip))
             dark = ccdproc.fits_ccddata_reader(dark_file, unit='adu', hdu=chip)
             dark_diff = ccdproc.subtract_bias(dark, master_biases[chip])
             mean, median, stddev = stats.sigma_clipped_stats(dark_diff.data,
@@ -228,38 +229,21 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
     ##-------------------------------------------------------------------------
     if plots:
         logger.info('Generating figure with dark current fits')
+        color = {1: 'B', 2: 'G', 3: 'R'}
         plt.figure(figsize=(15,9), dpi=72)
-        ax = plt.subplot(111)
-        ax.plot(dark_table[dark_table['chip'] == 1]['exptime'],\
-                dark_table[dark_table['chip'] == 1]['mean'],\
-                'bo',\
-                label='mean count level in ADU (B)',\
-                alpha=1.0)
-        ax.plot([0, 1000],\
-                [dc_fit[1](0), dc_fit[1](1000)],\
-                'b-',\
-                label='dark current (B) = {:.2f} ADU/600s'.format(dc_fit[1].slope.value*600.),\
-                alpha=0.3)
-        ax.plot(dark_table[dark_table['chip'] == 2]['exptime'],\
-                dark_table[dark_table['chip'] == 2]['mean'],\
-                'go',\
-                label='mean count level in ADU (G)',\
-                alpha=1.0)
-        ax.plot([0, 1000],\
-                [dc_fit[2](0), dc_fit[2](1000)],\
-                'g-',\
-                label='dark current (G) = {:.2f} ADU/600s'.format(dc_fit[1].slope.value*600.),\
-                alpha=0.3)
-        ax.plot(dark_table[dark_table['chip'] == 3]['exptime'],\
-                dark_table[dark_table['chip'] == 3]['mean'],\
-                'ro',\
-                label='mean count level in ADU (R)',\
-                alpha=1.0)
-        ax.plot([0, 1000],\
-                [dc_fit[3](0), dc_fit[3](1000)],\
-                'r-',\
-                label='dark current (R) = {:.2f} ADU/600s'.format(dc_fit[3].slope.value*600.),\
-                alpha=0.3)
+        ax = plt.subplot(1,1,1)
+        for chip in chips:
+            ax.plot(dark_table[dark_table['chip'] == chip]['exptime'],\
+                    dark_table[dark_table['chip'] == chip]['mean'],\
+                    '{}o'.format(color[chip].lower()),\
+                    label='mean count level in ADU ({})'.format(color[chip]),\
+                    alpha=1.0)
+            ax.plot([0, 1000],\
+                    [dc_fit[chip](0), dc_fit[chip](1000)],\
+                    '{}-'.format(color[chip].lower()),\
+                    label='dark current ({}) = {:.2f} ADU/600s'.format(\
+                          color[chip], dc_fit[chip].slope.value*600.),\
+                    alpha=0.3)
         plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
         plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
         ax.set_xlabel('Exposure Time (s)')
