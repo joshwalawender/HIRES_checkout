@@ -186,7 +186,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
     logger.info('Analyzing bias subtracted dark frames to measure dark current.')
     logger.info('  Determining image statistics of each dark using sigma clipping.')
     logger.info('    sigma={:d}, iters={:d}'.format(clipping_sigma, clipping_iters))
-    logger.info('  Hot pixels defines as pixels with dark current > {:.2f} ADU/s'.format(hpthresh))
+    logger.info('  Hot pixels are defined as pixels with dark current > {:.2f} ADU/s'.format(hpthresh))
 
     for dark_file in dark_files:
         hdr = fits.getheader(dark_file, 0)
@@ -260,7 +260,6 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
                 'r-',\
                 label='dark current (R) = {:.2f} ADU/600s'.format(dc_fit[3].slope.value*600.),\
                 alpha=0.3)
-        ax.legend(loc='best', fontsize=10)
         plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
         plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
         ax.set_xlabel('Exposure Time (s)')
@@ -289,10 +288,11 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
 def gain(flat_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
     clipping_sigma = 5
     clipping_iters = 1
-    flat_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'gain'),\
-                       dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4', 'f4'))
+    flat_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev'),\
+                       dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4'))
 
     flats = {1: [], 2: [], 3: []}
+    flats_1s = {1: [], 2: [], 3: []}
     logger.info('Reading in all flat files')
     for flat_file in flat_files:
         logger.debug('  Reading {}'.format(flat_file))
@@ -300,14 +300,16 @@ def gain(flat_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
         exptime = float(hdr['EXPTIME'])
         for chip in chips:
             flat = ccdproc.fits_ccddata_reader(flat_file, unit='adu', hdu=chip)
+            flat.header.set('EXPTIME', exptime, 'from ext0')
             flat_bs = ccdproc.subtract_bias(flat, master_biases[chip])
+            flats[chip].append(flat_bs)
             flat_1s = flat_bs.divide(exptime * u.second)
-            flats[chip].append(flat_1s)
+            flats_1s[chip].append(flat_1s)
 
     master_flats = {1: None, 2: None, 3: None}
     for chip in chips:
         logger.info('Making master flat for chip {:d}'.format(chip))
-        combined = ccdproc.combine(flats[chip], method='average',
+        combined = ccdproc.combine(flats_1s[chip], method='average',
                                    sigma_clip=True,
                                    sigma_clip_low_thresh=clipping_sigma,
                                    sigma_clip_high_thresh=clipping_sigma,
@@ -342,17 +344,46 @@ def gain(flat_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
                                          mask = mask,
                                          sigma=clipping_sigma,
                                          iters=clipping_iters) * flat_flattened.unit
-            gain = median.value / stddev.value**2
-            logger.debug('  Flat[{:d}] (mean, med, std, gain) = '\
-                         '{:.1f}, {:.1f}, {:.2f} {}, {:.2f}'.format(\
-                         chip, mean.value, median.value, stddev.value, flat_flattened.unit, gain))
+            logger.debug('  Flat[{:d}] (mean, med, std) = '\
+                         '{:.1f}, {:.1f}, {:.2f} {}'.format(\
+                         chip, mean.value, median.value, stddev.value, flat_flattened.unit))
 
-            flat_table.add_row([flat_file, exptime, chip, mean, median, stddev, gain])
+            exptime = flat.header.get('EXPTIME')
+            flat_table.add_row([flat_file, exptime, chip, mean, median, stddev])
 
-#             flat_flattened.write('flat_flattened{:d}.fits'.format(chip), overwrite=True)
-#             sys.exit(0)
 
     print(flat_table)
+
+    ##-------------------------------------------------------------------------
+    ## Plot Flat Statistics
+    ##-------------------------------------------------------------------------
+    if plots:
+        logger.info('Generating figure with flat statistics and gain fits')
+        plt.figure(figsize=(15,9), dpi=72)
+        color = {1: 'B', 2: 'G', 3: 'R'}
+        for chip in chips:
+            ax = plt.subplot(1,1,chip)
+            ax.plot(flat_table[flat_table['chip'] == 1]['stddev']**2,\
+                    flat_table[flat_table['chip'] == 1]['mean'],\
+                    '{}o'.format(color[chip].lower()),\
+#                     label='mean count level in ADU ({})'.foarmat(color[chip]),\
+                    alpha=1.0)
+        plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
+        plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
+        ax.set_xlabel('Variance')
+        ax.set_ylabel('Mean Level (ADU)')
+        ax.grid()
+        ax.legend(loc='best', fontsize=10)
+#         ax.set_title('Dark Current'\
+#                      '\n(Mean computed using sigma clipping: sigma={:d}, '\
+#                      'iterations={:d})'.format(\
+#                      clipping_sigma, clipping_iters), fontsize=10)
+        ax.grid()
+        plotfilename = 'FlatStats.png'
+        logger.info('  Saving: {}'.format(plotfilename))
+        plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
+        plt.close()
+        logger.info('  Done.')
 
 
 if __name__ == '__main__':
