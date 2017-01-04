@@ -59,14 +59,17 @@ def get_file_list(input):
 
     bias_files = []
     dark_files = []
+    flat_files = []
     for file in files:
         hdr = fits.getheader(file, 0)
         if hdr.get('OBSTYPE').strip() == 'Bias':
             bias_files.append(file)
         elif hdr.get('OBSTYPE').strip() == 'Dark':
             dark_files.append(file)
+        elif hdr.get('OBSTYPE').strip() == 'IntFlat':
+            flat_files.append(file)
 
-    dict = {'bias': bias_files, 'dark': dark_files}
+    dict = {'bias': bias_files, 'dark': dark_files, 'flat': flat_files}
 
     return dict
 
@@ -198,7 +201,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
             nhotpix = len(dark_diff.data.ravel()[dark_diff.data.ravel() > thresh])
             dark_table.add_row([dark_file, exptime, chip, mean, median, stddev, nhotpix])
 
-    logger.info('  Fitting line to levels as a function of exposure time')
+    logger.debug('  Fitting line to levels as a function of exposure time')
     line = models.Linear1D(intercept=0, slope=0)
     line.intercept.fixed = True
     fitter = fitting.LinearLSQFitter()
@@ -280,6 +283,78 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
 
 
 
+##-------------------------------------------------------------------------
+## Determine Gain
+##-------------------------------------------------------------------------
+def gain(flat_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
+    clipping_sigma = 5
+    clipping_iters = 1
+    flat_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'gain'),\
+                       dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4', 'f4'))
+
+    flats = {1: [], 2: [], 3: []}
+    logger.info('Reading in all flat files')
+    for flat_file in flat_files:
+        logger.debug('  Reading {}'.format(flat_file))
+        hdr = fits.getheader(flat_file, 0)
+        exptime = float(hdr['EXPTIME'])
+        for chip in chips:
+            flat = ccdproc.fits_ccddata_reader(flat_file, unit='adu', hdu=chip)
+            flat_bs = ccdproc.subtract_bias(flat, master_biases[chip])
+            flat_1s = flat_bs.divide(exptime * u.second)
+            flats[chip].append(flat_1s)
+
+    master_flats = {1: None, 2: None, 3: None}
+    for chip in chips:
+        logger.info('Making master flat for chip {:d}'.format(chip))
+        combined = ccdproc.combine(flats[chip], method='average',
+                                   sigma_clip=True,
+                                   sigma_clip_low_thresh=clipping_sigma,
+                                   sigma_clip_high_thresh=clipping_sigma,
+                                  )
+        norm_factor = np.percentile(combined.data, 99.8) * u.adu / u.second
+        master_flats[chip] = combined.divide(norm_factor)
+        
+        logger.info('  Masking low SNR pixels')
+        dev = ccdproc.background_deviation_filter(master_flats[chip].data, bbox=11)
+        snr = master_flats[chip].data/dev
+        mask = (snr <= 10)
+        nmasked = np.sum(np.array(mask.ravel(), dtype=int))
+        master_flats[chip].mask = mask
+
+        logger.debug('  Writing master flat to file')
+        master_flats[chip].write('master_flat{:d}.fits'.format(chip), overwrite=True)
+
+        mean, median, stddev = stats.sigma_clipped_stats(master_flats[chip].data,
+                                     mask = mask,
+                                     sigma=clipping_sigma,
+                                     iters=clipping_iters) * master_flats[chip].unit
+        logger.debug('  Masked {:d} pixels in master flat'.format(nmasked))
+        logger.debug('  MasterFlat[{:d}] (mean, med, std) = '\
+                     '{:.1f}, {:.1f}, {:.2f} {}'.format(\
+                     chip, mean.value, median.value, stddev.value, master_flats[chip].unit))
+
+        
+        for flat in flats[chip]:
+            flat.mask = mask
+            flat_flattened = flat.divide(master_flats[chip])
+            mean, median, stddev = stats.sigma_clipped_stats(flat_flattened.data,
+                                         mask = mask,
+                                         sigma=clipping_sigma,
+                                         iters=clipping_iters) * flat_flattened.unit
+            gain = median.value / stddev.value**2
+            logger.debug('  Flat[{:d}] (mean, med, std, gain) = '\
+                         '{:.1f}, {:.1f}, {:.2f} {}, {:.2f}'.format(\
+                         chip, mean.value, median.value, stddev.value, flat_flattened.unit, gain))
+
+            flat_table.add_row([flat_file, exptime, chip, mean, median, stddev, gain])
+
+#             flat_flattened.write('flat_flattened{:d}.fits'.format(chip), overwrite=True)
+#             sys.exit(0)
+
+    print(flat_table)
+
+
 if __name__ == '__main__':
     ##-------------------------------------------------------------------------
     ## Parse Command Line Arguments
@@ -330,3 +405,4 @@ if __name__ == '__main__':
     print(RN)
     DC = dark_current(lists['dark'], master_biases, plots=plots, logger=logger, chips=[1])
     print(DC)
+    gain(lists['flat'], master_biases, plots=plots, logger=logger, chips=[1])
