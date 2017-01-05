@@ -217,11 +217,11 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
                               dark_table[dark_table['chip'] == chip]['mean'])
         dark_current = dc_fit[chip].slope.value * u.adu/u.second
         thischip = long_dark_table[long_dark_table['chip'] == chip]
-        nhotpix = int(np.mean(thischip['nhotpix']))
-        nhotpixstd = int(np.std(thischip['nhotpix']))
+        nhotpix = int(np.mean(thischip['nhotpix'])) * u.pix
+        nhotpixstd = int(np.std(thischip['nhotpix'])) * u.pix
         logger.info('For chip #{:d}:'.format(chip))
         logger.info('  Dark Current = {:.2f} ADU/600s'.format(dark_current.value*600.))
-        logger.info('  Found {:d} +/- {:d} hot pixels'.format(nhotpix, nhotpixstd))
+        logger.info('  Found {:.0f} +/- {:.0f} hot pixels'.format(nhotpix, nhotpixstd))
         dark_stats[chip] = [dark_current, nhotpix, nhotpixstd]
 
     ##-------------------------------------------------------------------------
