@@ -368,6 +368,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
             ax.set_ylabel('Variance')
             ax.set_xlabel('Mean Level (ADU)')
             ax.grid()
+            ax.legend(loc='best', fontsize=10)
 
         plotfilename = 'FlatStats.png'
         logger.info('  Saving: {}'.format(plotfilename))
