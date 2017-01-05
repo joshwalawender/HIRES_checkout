@@ -108,7 +108,10 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
             else:
                 biases.append(ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip))
         logger.debug('  Making master bias')
-        master_bias = ccdproc.combine(biases, combine='median')
+        master_bias = ccdproc.combine(biases, combine='average',
+                                      sigma_clip=True,
+                                      sigma_clip_low_thresh=clipping_sigma,
+                                      sigma_clip_high_thresh=clipping_sigma)
         master_biases[chip] = master_bias
         mean, median, stddev = stats.sigma_clipped_stats(master_bias.data,
                                      sigma=clipping_sigma,
