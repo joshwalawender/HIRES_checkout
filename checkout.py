@@ -214,6 +214,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
     for chip in chips:
         dc_fit[chip] = fitter(line, dark_table[dark_table['chip'] == chip]['exptime'],\
                               dark_table[dark_table['chip'] == chip]['mean'])
+#         print(fitter.fit_info)
         dark_current = dc_fit[chip].slope.value * u.adu/u.second
         thischip = long_dark_table[long_dark_table['chip'] == chip]
         nhotpix = int(np.mean(thischip['nhotpix'])) * u.pix
@@ -269,7 +270,8 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
     flat_table = Table(names=('filename', 'EXPTIME', 'TTIME'),\
                        dtype=('a64', 'f4', 'f4'))
 
-    logger.info('Reading headers for all flat files')
+    logger.info('Fitting model to signal vs. variance data to derive gain')
+    logger.debug('  Reading headers for all flat files')
     for flat_file in flat_files:
         logger.debug('  Reading {}'.format(flat_file))
         hdr = fits.getheader(flat_file, 0)
@@ -284,7 +286,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
     for ttime in ttimes:
         exps = bytime.groups[bytime.groups.keys['TTIME'] == ttime]
         nexps = len(exps)
-        logger.info('Measuring statistics for {:.0f} s flats'.format(float(ttime)))
+        logger.debug('  Measuring statistics for {:.0f} s flats'.format(float(ttime)))
         for i in np.arange(0,nexps,2):
             if i+1 < nexps:
                 flat_fileA = exps['filename'][i].decode('utf8')
@@ -320,6 +322,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
     ## var = RN^2 + 1/g S + k^2 S^2
     gainfits = {}
     g = {}
+    gerr = {}
     for chip in chips:
         if read_noise:
             poly = models.Polynomial1D(degree=2,\
@@ -330,8 +333,14 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
         poly.c2.min = 0.0
         fitter = fitting.LevMarLSQFitter()
         gainfits[chip] = fitter(poly, signal[chip], variance[chip])
-        g[chip] = 1./gainfits[chip].c1 * u.electron/u.adu
-        logger.info('Gain[{}] = {:.2f} e/ADU'.format(chip, g[chip].value))
+        perr = np.sqrt(np.diag(fitter.fit_info['param_cov']))
+        ksq = gainfits[chip].c2.value
+        ksqerr = perr[1]
+        logger.info('  k^2[{}] = {:.2e} +/- {:.2e} e/ADU'.format(chip, ksq, ksqerr))
+        g[chip] = gainfits[chip].c1**-1 * u.electron/u.adu
+        gerr[chip] = gainfits[chip].c1**-2 * perr[0] * u.electron/u.adu
+        logger.info('  Gain[{}] = {:.2f} +/- {:.2f} e/ADU'.format(chip,
+                    g[chip].value, gerr[chip].value))
 
 
     ##-------------------------------------------------------------------------
@@ -343,17 +352,19 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
         color = {1: 'B', 2: 'G', 3: 'R'}
         for chip in chips:
             ax = plt.subplot(len(chips),1,chip)
-            ax.plot(variance[chip],\
-                    signal[chip],\
+            ax.plot(signal[chip],\
+                    variance[chip],\
                     '{}o'.format(color[chip].lower()),\
                     alpha=1.0)
             sig_fit = np.linspace(min(signal[chip]), max(signal[chip]), 50)
             var_fit = [gainfits[chip](x) for x in sig_fit]
-            ax.plot(var_fit, sig_fit,\
+            ax.plot(sig_fit, var_fit,\
                     '{}-'.format(color[chip].lower()),\
+                    label='Gain={:.2f} +/- {:.2f} e/ADU'.format(
+                          g[chip].value, gerr[chip].value),
                     alpha=0.7)
-            ax.set_xlabel('Variance')
-            ax.set_ylabel('Mean Level (ADU)')
+            ax.set_ylabel('Variance')
+            ax.set_xlabel('Mean Level (ADU)')
             ax.grid()
 
         plotfilename = 'FlatStats.png'
@@ -422,7 +433,7 @@ if __name__ == '__main__':
         RNe = RNC[chip] * g[chip]
         DCe = DCC[chip][0] * g[chip]
         print('Chip {:d}'.format(chip))
-        print('  Read Noise[{:d}] = {:.1f}'.format(chip, RNe))
-        print('  Dark Current[{:d}] = {:.3f}'.format(chip, DCe))
+        print('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNe))
+        print('  Dark Current[{:d}] = {:.4f}'.format(chip, DCe))
         print('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, DCC[chip][1], DCC[chip][2]))
-        print('  Gain[{:d}] = {:.2f}'.format(chip, g[chip]))
+        print('  Gain[{:d}]         = {:.2f}'.format(chip, g[chip]))
