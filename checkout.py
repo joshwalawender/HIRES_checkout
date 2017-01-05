@@ -84,14 +84,15 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
     clipping_sigma = 5
     clipping_iters = 1
     if plots:
-        plt.figure(figsize=(9,15), dpi=72)
+        plt.figure(figsize=(11,len(chips)*5), dpi=72)
         binsize = 1.0
     master_biases = {}
     read_noise = {}
     for chip in chips:
         logger.info('Analyzing Chip {:d}'.format(chip))
         if plots:
-            ax = plt.subplot(3,1,chip)
+            ax = plt.subplot(len(chips),1,chip)
+            color = {1: 'B', 2: 'G', 3: 'R'}
         biases = []
         for bias_file in bias_files:
             logger.debug('  Reading bias: {}[{}]'.format(bias_file, chip))
@@ -145,12 +146,12 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
                                          stddev=RN)
             gaussian_plot = [gaussian(x) for x in centers]
             plt.bar(centers, hist,
-                    align='center', width=0.7*binsize, log=True, color='b',
+                    align='center', width=0.7*binsize, log=True, color='{}'.format(color[chip].lower()),
                     alpha=0.5,
-                    label='Blue CCD Pixel Count Histogram')
-            plt.plot(centers, gaussian_plot, 'b-', alpha=0.8,\
+                    label='{} CCD Pixel Count Histogram'.format(color[chip]))
+            plt.plot(centers, gaussian_plot, '{}-'.format(color[chip].lower()), alpha=0.8,\
                      label='Gaussian with sigma = {:.2f}'.format(RN))
-            plt.plot([mean.value, mean.value], [1, 2*max(hist)],
+            plt.plot([mean.value, mean.value], [1, 2*max(hist)], 'k-',
                      label='Mean Pixel Value')
             plt.xlim(np.floor(mean.value-15.*RN.value),
                      np.ceil(mean.value+15.*RN.value))
@@ -178,7 +179,6 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
     hpthresh = 0.2   # hot pixel defined as dark current of 0.2 ADU/s
     clipping_sigma = 5
     clipping_iters = 1
-    plt.figure(figsize=(9,15), dpi=72)
     binsize = 1.0
 
     dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'nhotpix'),\
@@ -230,9 +230,9 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
     if plots:
         logger.info('Generating figure with dark current fits')
         color = {1: 'B', 2: 'G', 3: 'R'}
-        plt.figure(figsize=(15,9), dpi=72)
-        ax = plt.subplot(1,1,1)
+        plt.figure(figsize=(11,len(chips)*5), dpi=72)
         for chip in chips:
+            ax = plt.subplot(len(chips),1,chip)
             ax.plot(dark_table[dark_table['chip'] == chip]['exptime'],\
                     dark_table[dark_table['chip'] == chip]['mean'],\
                     '{}o'.format(color[chip].lower()),\
@@ -244,17 +244,12 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
                     label='dark current ({}) = {:.2f} ADU/600s'.format(\
                           color[chip], dc_fit[chip].slope.value*600.),\
                     alpha=0.3)
-        plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
-        plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
-        ax.set_xlabel('Exposure Time (s)')
-        ax.set_ylabel('Dark Level (ADU)')
-        ax.grid()
-        ax.legend(loc='best', fontsize=10)
-        ax.set_title('Dark Current'\
-                     '\n(Mean computed using sigma clipping: sigma={:d}, '\
-                     'iterations={:d})'.format(\
-                     clipping_sigma, clipping_iters), fontsize=10)
-        ax.grid()
+            plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
+            plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
+            ax.set_xlabel('Exposure Time (s)')
+            ax.set_ylabel('Dark Level (ADU)')
+            ax.legend(loc='best', fontsize=10)
+            ax.grid()
 
         plotfilename = 'DarkCurrent.png'
         logger.info('  Saving: {}'.format(plotfilename))
