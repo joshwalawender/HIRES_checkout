@@ -301,7 +301,7 @@ def gain(flat_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
                     meanA, medA, stdA = stats.sigma_clipped_stats(expA_bs.data,
                                               sigma=clipping_sigma,
                                               iters=clipping_iters)
-                    logger.debug('  Reading {}[{}]'.format(flat_fileB, chip))
+                    logger.debug('  Reading flat: {}[{}]'.format(flat_fileB, chip))
                     expB = ccdproc.fits_ccddata_reader(flat_fileB, unit='adu', hdu=chip)
                     expB_bs = ccdproc.subtract_bias(expB, master_biases[chip])
                     meanB, medB, stdB = stats.sigma_clipped_stats(expB_bs.data,
@@ -314,6 +314,8 @@ def gain(flat_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
                     mean, med, std = stats.sigma_clipped_stats(diff.data,
                                               sigma=clipping_sigma,
                                               iters=clipping_iters)
+                    logger.debug('  Signal Level = {:.1f}'.format(meanA))
+                    logger.debug('  Variance = {:.1f}'.format(std**2/2.0))
                     variance[chip].append(std**2/2.0)
                     signal[chip].append(meanA)
 
