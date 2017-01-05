@@ -80,6 +80,7 @@ def get_file_list(input):
 def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
     '''
     '''
+    logger.info('Analyzing noise in bias frames to determine read noise')
     nbiases = len(bias_files)
     clipping_sigma = 5
     clipping_iters = 1
@@ -89,7 +90,7 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
     master_biases = {}
     read_noise = {}
     for chip in chips:
-        logger.info('Analyzing Chip {:d}'.format(chip))
+        logger.info('  Analyzing Chip {:d}'.format(chip))
         if plots:
             ax = plt.subplot(len(chips),1,chip)
             color = {1: 'B', 2: 'G', 3: 'R'}
@@ -131,7 +132,7 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
                      chip, mean.value, median.value, mode, stddev.value))
         RN = stddev / np.sqrt(1.+1./(nbiases-1))
         read_noise[chip] = RN
-        logger.info('  Read Noise is {:.2f}'.format(RN))
+        logger.info('  Read Noise[{:d}] is {:.2f}'.format(chip, RN))
 
         ##---------------------------------------------------------------------
         ## Plot Bias Frame Histograms
@@ -186,8 +187,8 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
     dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'nhotpix'),\
                        dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4', 'i4'))
     logger.info('Analyzing bias subtracted dark frames to measure dark current.')
-    logger.info('  Determining image statistics of each dark using sigma clipping.')
-    logger.info('    sigma={:d}, iters={:d}'.format(clipping_sigma, clipping_iters))
+    logger.debug('  Determining image statistics of each dark using sigma clipping.')
+    logger.debug('    sigma={:d}, iters={:d}'.format(clipping_sigma, clipping_iters))
     logger.info('  Hot pixels are defined as pixels with dark current > {:.2f} ADU/s'.format(hpthresh))
 
     for dark_file in dark_files:
@@ -222,16 +223,15 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
         thischip = long_dark_table[long_dark_table['chip'] == chip]
         nhotpix = int(np.mean(thischip['nhotpix'])) * u.pix
         nhotpixstd = int(np.std(thischip['nhotpix'])) * u.pix
-        logger.info('For chip {:d}:'.format(chip))
-        logger.info('  Dark Current = {:.2f} ADU/600s'.format(dark_current.value*600.))
-        logger.info('  Found {:.0f} +/- {:.0f} hot pixels'.format(nhotpix, nhotpixstd))
+        logger.info('  Analyzing Chip {:d}'.format(chip))
+        logger.info('  Dark Current[{:d}] = {:.4f} ADU/600s'.format(chip, dark_current.value*600.))
+        logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(nhotpix, nhotpixstd))
         dark_stats[chip] = [dark_current, nhotpix, nhotpixstd]
 
     ##-------------------------------------------------------------------------
     ## Plot Dark Frame Levels
     ##-------------------------------------------------------------------------
     if plots:
-        logger.info('Generating figure with dark current fits')
         color = {1: 'B', 2: 'G', 3: 'R'}
         plt.figure(figsize=(11,len(chips)*5), dpi=72)
         for chip in chips:
@@ -255,10 +255,9 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
             ax.grid()
 
         plotfilename = 'DarkCurrent.png'
-        logger.info('  Saving: {}'.format(plotfilename))
+        logger.info('Saving: {}'.format(plotfilename))
         plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
         plt.close()
-        logger.info('  Done.')
 
     return dark_stats
 
@@ -376,7 +375,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
         plt.close()
         logger.info('  Done.')
 
-    return g
+    return g, gerr
 
 
 if __name__ == '__main__':
@@ -429,8 +428,8 @@ if __name__ == '__main__':
                                    plots=plots, logger=logger, chips=chips)
     DCC = dark_current(lists['dark'], master_biases,
                       plots=plots, logger=logger, chips=chips)
-    g = gain(lists['flat'], master_biases, read_noise=RNC,
-             plots=plots, logger=logger, chips=chips)
+    g, gerr = gain(lists['flat'], master_biases, read_noise=RNC,
+                   plots=plots, logger=logger, chips=chips)
 
     for chip in chips:
         RNe = RNC[chip] * g[chip]
@@ -439,4 +438,4 @@ if __name__ == '__main__':
         print('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNe))
         print('  Dark Current[{:d}] = {:.4f}'.format(chip, DCe))
         print('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, DCC[chip][1], DCC[chip][2]))
-        print('  Gain[{:d}]         = {:.2f}'.format(chip, g[chip]))
+        print('  Gain[{:d}]         = {:.2f} +/- {:.2f} e/ADU'.format(chip, g[chip].value, gerr[chip].value))
