@@ -225,7 +225,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
         nhotpixstd = int(np.std(thischip['nhotpix'])) * u.pix
         logger.info('  Analyzing Chip {:d}'.format(chip))
         logger.info('  Dark Current[{:d}] = {:.4f} ADU/600s'.format(chip, dark_current.value*600.))
-        logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(nhotpix, nhotpixstd))
+        logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, nhotpix, nhotpixstd))
         dark_stats[chip] = [dark_current, nhotpix, nhotpixstd]
 
     ##-------------------------------------------------------------------------
