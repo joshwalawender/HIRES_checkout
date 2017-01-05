@@ -128,7 +128,6 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
                      chip, mean.value, median.value, mode, stddev.value))
         RN = stddev / np.sqrt(1.+1./(nbiases-1))
         read_noise[chip] = RN
-        logger.info('For chip #{:d}:'.format(chip))
         logger.info('  Read Noise is {:.2f}'.format(RN))
 
         ##---------------------------------------------------------------------
@@ -219,7 +218,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
         thischip = long_dark_table[long_dark_table['chip'] == chip]
         nhotpix = int(np.mean(thischip['nhotpix'])) * u.pix
         nhotpixstd = int(np.std(thischip['nhotpix'])) * u.pix
-        logger.info('For chip #{:d}:'.format(chip))
+        logger.info('For chip {:d}:'.format(chip))
         logger.info('  Dark Current = {:.2f} ADU/600s'.format(dark_current.value*600.))
         logger.info('  Found {:.0f} +/- {:.0f} hot pixels'.format(nhotpix, nhotpixstd))
         dark_stats[chip] = [dark_current, nhotpix, nhotpixstd]
