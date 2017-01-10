@@ -162,7 +162,7 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
             ax.set_xlabel('Counts (ADU)', fontsize=10)
             ax.set_ylabel('Number of Pixels', fontsize=10)
             ax.grid()
-            ax.legend(loc='best', fontsize=10)
+            ax.legend(loc='upper left', fontsize=10)
 
     if plots:
         plotfilename = 'BiasHistogram.png'
@@ -251,7 +251,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
             plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
             ax.set_xlabel('Exposure Time (s)')
             ax.set_ylabel('Dark Level (ADU)')
-            ax.legend(loc='best', fontsize=10)
+            ax.legend(loc='upper left', fontsize=10)
             ax.grid()
 
         plotfilename = 'DarkCurrent.png'
@@ -368,7 +368,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
             ax.set_ylabel('Variance')
             ax.set_xlabel('Mean Level (ADU)')
             ax.grid()
-            ax.legend(loc='best', fontsize=10)
+            ax.legend(loc='upper left', fontsize=10)
 
         plotfilename = 'FlatStats.png'
         logger.info('  Saving: {}'.format(plotfilename))
