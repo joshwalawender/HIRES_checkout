@@ -1,6 +1,6 @@
 *png
 dark_table.txt
 *pyc
-files.txt
+files*.txt
 .gitignore
 *.fits
