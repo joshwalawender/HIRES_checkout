@@ -248,14 +248,16 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
                           color[chip], dc_fit[chip].slope.value*600.),\
                     alpha=0.3)
             plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
-            plt.ylim(np.floor(min(dark_table['mean'])), np.ceil(max(dark_table['mean'])))
+            min_level = np.floor(min(dark_table['mean']))
+            max_level = np.ceil(max(dark_table['mean']))
+            plt.ylim(min([0,min_level]), max_level)
             ax.set_xlabel('Exposure Time (s)')
             ax.set_ylabel('Dark Level (ADU)')
             ax.legend(loc='upper left', fontsize=10)
             ax.grid()
 
         plotfilename = 'DarkCurrent.png'
-        logger.info('Saving: {}'.format(plotfilename))
+        logger.info('  Saving: {}'.format(plotfilename))
         plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
         plt.close()
 
@@ -349,7 +351,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
     ## Plot Flat Statistics
     ##-------------------------------------------------------------------------
     if plots:
-        logger.info('Generating figure with flat statistics and gain fits')
+        logger.info('  Generating figure with flat statistics and gain fits')
         plt.figure(figsize=(11,len(chips)*5), dpi=72)
         color = {1: 'B', 2: 'G', 3: 'R'}
         for chip in chips:
