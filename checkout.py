@@ -166,7 +166,7 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
 
     if plots:
         plotfilename = 'BiasHistogram.png'
-        logger.info('Saving: {}'.format(plotfilename))
+        logger.info('  Saving: {}'.format(plotfilename))
         plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
         plt.close()
 
@@ -179,7 +179,7 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
 ##-------------------------------------------------------------------------
 def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
     ndarks = len(dark_files)
-    hpthresh = 0.2   # hot pixel defined as dark current of 0.2 ADU/s
+    hpthresh = 0.5  # hot pixel defined as dark current of 0.5 ADU/s ~ 1 e-/s
     clipping_sigma = 5
     clipping_iters = 1
     binsize = 1.0
@@ -222,7 +222,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
         dark_current = dc_fit[chip].slope.value * u.adu/u.second
         thischip = long_dark_table[long_dark_table['chip'] == chip]
         nhotpix = int(np.mean(thischip['nhotpix'])) * u.pix
-        nhotpixstd = int(np.std(thischip['nhotpix'])) * u.pix
+        nhotpixstd = int(np.std(thischip['nhotpix'])) / np.sqrt(len(thischip['nhotpix'])) * u.pix
         logger.info('  Analyzing Chip {:d}'.format(chip))
         logger.info('  Dark Current[{:d}] = {:.4f} ADU/600s'.format(chip, dark_current.value*600.))
         logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, nhotpix, nhotpixstd))
