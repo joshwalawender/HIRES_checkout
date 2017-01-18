@@ -77,13 +77,12 @@ def get_file_list(input):
 ##-------------------------------------------------------------------------
 ## Determine Read Noise
 ##-------------------------------------------------------------------------
-def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
+def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
+               clipping_sigma=5, clipping_iters=3):
     '''
     '''
     logger.info('Analyzing noise in bias frames to determine read noise')
     nbiases = len(bias_files)
-    clipping_sigma = 5
-    clipping_iters = 1
     if plots:
         plt.figure(figsize=(11,len(chips)*5), dpi=72)
         binsize = 1.0
@@ -177,11 +176,9 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3]):
 ##-------------------------------------------------------------------------
 ## Determine Dark Current
 ##-------------------------------------------------------------------------
-def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2,3]):
+def dark_current(dark_files, master_biases, plots=False, logger=None,
+                 chips=[1,2,3], clipping_sigma=5, clipping_iters=3, hpthresh=0.5):
     ndarks = len(dark_files)
-    hpthresh = 0.5  # hot pixel defined as dark current of 0.5 ADU/s ~ 1 e-/s
-    clipping_sigma = 5
-    clipping_iters = 1
     binsize = 1.0
 
     dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'nhotpix'),\
@@ -268,66 +265,84 @@ def dark_current(dark_files, master_biases, plots=False, logger=None, chips=[1,2
 ##-------------------------------------------------------------------------
 ## Determine Gain
 ##-------------------------------------------------------------------------
-def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, chips=[1,2,3]):
-    clipping_sigma = 5
-    clipping_iters = 1
-    flat_table = Table(names=('filename', 'EXPTIME', 'TTIME'),\
-                       dtype=('a64', 'f4', 'f4'))
+def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
+         chips=[1,2,3], clipping_sigma=5, clipping_iters=3, aduthreshold=15000):
 
+    flat_table = Table()
     logger.info('Fitting model to signal vs. variance data to derive gain')
-    logger.debug('  Reading headers for all flat files')
+    logger.info('  Reading flat files')
+    exptimes = []
+    ttimes = []
+    ccds = {}
+    signal = {}
     for flat_file in flat_files:
         logger.debug('  Reading {}'.format(flat_file))
         hdr = fits.getheader(flat_file, 0)
-        exptime = float(hdr['EXPTIME'])
-        ttime = float(hdr['TTIME'])
-        flat_table.add_row([flat_file, exptime, ttime])
+        exptimes.append(float(hdr['EXPTIME']))
+        ttimes.append(float(hdr['TTIME']))
+        ccds[flat_file] = {}
+        for chip in chips:
+            if not chip in signal.keys():
+                signal[chip] = []
+            exp = ccdproc.fits_ccddata_reader(flat_file, unit='adu', hdu=chip)
+            ccds[flat_file][chip] = ccdproc.subtract_bias(exp, master_biases[chip])
+            mean, med, std = stats.sigma_clipped_stats(ccds[flat_file][chip].data,
+                                   sigma=clipping_sigma,
+                                   iters=clipping_iters)
+            signal[chip].append(mean)
+    flat_table.add_columns([Column(flat_files, 'filename', dtype='a128'),
+                            Column(exptimes, 'EXPTIME', dtype='f4'),
+                            Column(ttimes, 'TTIME', dtype='f4')])
+    for chip in chips:
+        flat_table.add_column(Column(signal[chip], 'signal{:d}'.format(chip), dtype='f4'))
 
     bytime = flat_table.group_by('TTIME')
     ttimes = sorted(set(flat_table['TTIME']))
-    signal = {1: [], 2: [], 3: []}
-    variance = {1: [], 2: [], 3: []}
+    signal = {}
+    variance = {}
+    signal_times = {}
     for ttime in ttimes:
         exps = bytime.groups[bytime.groups.keys['TTIME'] == ttime]
         nexps = len(exps)
-        logger.debug('  Measuring statistics for {:.0f} s flats'.format(float(ttime)))
+        logger.info('  Measuring statistics for {:.0f} s flats'.format(float(ttime)))
         for i in np.arange(0,nexps,2):
             if i+1 < nexps:
                 flat_fileA = exps['filename'][i].decode('utf8')
                 flat_fileB = exps['filename'][i+1].decode('utf8')
                 for chip in chips:
-                    logger.debug('  Reading flat: {}[{}]'.format(flat_fileA, chip))
-                    expA = ccdproc.fits_ccddata_reader(flat_fileA, unit='adu', hdu=chip)
-                    expA_bs = ccdproc.subtract_bias(expA, master_biases[chip])
-                    meanA, medA, stdA = stats.sigma_clipped_stats(expA_bs.data,
-                                              sigma=clipping_sigma,
-                                              iters=clipping_iters)
-                    logger.debug('  Reading flat: {}[{}]'.format(flat_fileB, chip))
-                    expB = ccdproc.fits_ccddata_reader(flat_fileB, unit='adu', hdu=chip)
-                    expB_bs = ccdproc.subtract_bias(expB, master_biases[chip])
-                    meanB, medB, stdB = stats.sigma_clipped_stats(expB_bs.data,
-                                              sigma=clipping_sigma,
-                                              iters=clipping_iters)
-                    logger.debug('  Forming A-B difference pair for variance '\
-                                 'measurement with {:.1f} s exposure'.format(
-                                 float(ttime)))
+                    if not chip in signal.keys():
+                        signal[chip] = []
+                        variance[chip] = []
+                        signal_times[chip] = []
+                    expA = ccds[flat_fileA][chip]
+                    expB = ccds[flat_fileB][chip]
+                    meanA = exps[i]['signal{:d}'.format(chip)]
+                    meanB = exps[i+1]['signal{:d}'.format(chip)]
                     ratio = meanA/meanB
-                    expB_scaled = expB_bs.multiply(ratio)
-                    diff = expA_bs.subtract(expB_scaled)
+                    logger.debug('  Forming A-B difference pair for {:.1f} s exposure'.format(
+                                 float(ttime)))
+                    expB_scaled = expB.multiply(ratio)
+                    diff = expA.subtract(expB_scaled)
                     mean, med, std = stats.sigma_clipped_stats(diff.data,
                                               sigma=clipping_sigma,
                                               iters=clipping_iters)
-                    logger.debug('  Signal Level = {:.1f}'.format(meanA))
-                    logger.debug('  Variance = {:.1f}'.format(std**2/2.0))
+                    logger.debug('  Signal Level = {:.2f}'.format(meanA))
+                    logger.debug('  Variance = {:.2f}'.format(std**2/2.0))
                     variance[chip].append(std**2/2.0)
                     signal[chip].append(meanA)
+                    signal_times[chip].append(exps[i]['EXPTIME'])
 
     ## Fit model to variance vs. signal
     ## var = RN^2 + 1/g S + k^2 S^2
     gainfits = {}
     g = {}
     gerr = {}
+    linearity_fit = {}
+    mask = {}
     for chip in chips:
+        mask[chip] = np.array(np.array(signal[chip]) > aduthreshold)
+
+        ## Fit Gain with Polynomial Model
         if read_noise:
             poly = models.Polynomial1D(degree=2,\
                                        c0=read_noise[chip].to(u.adu).value)
@@ -336,7 +351,9 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
             poly = models.Polynomial1D(degree=2)
         poly.c2.min = 0.0
         fitter = fitting.LevMarLSQFitter()
-        gainfits[chip] = fitter(poly, signal[chip], variance[chip])
+        y = np.array(variance[chip])#[~mask[chip]]
+        x = np.array(signal[chip])#[~mask[chip]]
+        gainfits[chip] = fitter(poly, x, y)
         perr = np.sqrt(np.diag(fitter.fit_info['param_cov']))
         ksq = gainfits[chip].c2.value
         ksqerr = perr[1]
@@ -346,6 +363,26 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
         logger.info('  Gain[{}] = {:.2f} +/- {:.2f} e/ADU'.format(chip,
                     g[chip].value, gerr[chip].value))
 
+        ## Fit Gain with Linear Model
+        ##  var_ADU = (RN/g)^2 + 1/g * C_ADU
+        ##  var_ADU = (RN_ADU)^2 + 1/g * C_ADU
+#         line = models.Linear1D(intercept=read_noise[chip].to(u.adu).value**2,
+#                                slope=0.5)
+#         line.intercept.fixed = True
+#         fitter = fitting.LinearLSQFitter()
+#         y = np.array(variance[chip])[~mask[chip]]
+#         x = np.array(signal[chip])[~mask[chip]]
+#         gainfits[chip] = fitter(line, x, y)
+#         g[chip] = 1./gainfits[chip].slope.value * u.electron/u.adu
+#         logger.info('  Gain[{}] = {:.2f}'.format(chip, g[chip].value))
+
+        ## Fit Linearity
+        line = models.Linear1D(intercept=0, slope=500)
+        line.intercept.fixed = True
+        fitter = fitting.LinearLSQFitter()
+        x = np.array(signal_times[chip])[~mask[chip]]
+        y = np.array(signal[chip])[~mask[chip]]
+        linearity_fit[chip] = fitter(line, x, y)
 
     ##-------------------------------------------------------------------------
     ## Plot Flat Statistics
@@ -356,10 +393,17 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
         color = {1: 'B', 2: 'G', 3: 'R'}
         for chip in chips:
             ax = plt.subplot(len(chips),1,chip)
-            ax.plot(signal[chip],\
-                    variance[chip],\
-                    '{}o'.format(color[chip].lower()),\
-                    alpha=1.0)
+
+            x = np.array(signal[chip])[mask[chip]]
+            y = np.array(variance[chip])[mask[chip]]
+            ax.plot(x, y, '{}o'.format(color[chip].lower()), alpha=0.3,\
+                    markersize=5, markeredgewidth=0)
+
+            x = np.array(signal[chip])[~mask[chip]]
+            y = np.array(variance[chip])[~mask[chip]]
+            ax.plot(x, y, '{}o'.format(color[chip].lower()), alpha=1.0,\
+                    markersize=8, markeredgewidth=0)
+
             sig_fit = np.linspace(min(signal[chip]), max(signal[chip]), 50)
             var_fit = [gainfits[chip](x) for x in sig_fit]
             ax.plot(sig_fit, var_fit,\
@@ -367,12 +411,37 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None, c
                     label='Gain={:.2f} +/- {:.2f} e/ADU'.format(
                           g[chip].value, gerr[chip].value),
                     alpha=0.7)
+
             ax.set_ylabel('Variance')
             ax.set_xlabel('Mean Level (ADU)')
             ax.grid()
             ax.legend(loc='upper left', fontsize=10)
-
         plotfilename = 'FlatStats.png'
+        logger.info('  Saving: {}'.format(plotfilename))
+        plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
+        plt.close()
+        logger.info('  Done.')
+
+
+        logger.info('  Generating figure with linearity plot')
+        plt.figure(figsize=(11,len(chips)*5), dpi=72)
+        color = {1: 'B', 2: 'G', 3: 'R'}
+        for chip in chips:
+            ax = plt.subplot(len(chips),1,chip)
+
+            time = np.array(signal_times[chip])
+            counts = np.array(signal[chip])
+            fit_counts = [linearity_fit[chip](t) for t in time]
+            y = (counts-fit_counts)/counts * 100.
+
+            ax.plot(counts, y, '{}o'.format(color[chip].lower()), alpha=0.5,\
+                    markersize=5, markeredgewidth=0)
+            ax.plot([0, max(counts)], [0, 0], 'k-')
+
+            ax.set_xlabel('Counts (ADU)')
+            ax.set_ylabel('Signal Decrement (%) [(counts-fit)/counts]')
+            ax.grid()
+        plotfilename = 'Linearity.png'
         logger.info('  Saving: {}'.format(plotfilename))
         plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
         plt.close()
