@@ -1,7 +1,3 @@
-#!kpython
-
-from __future__ import division, print_function
-
 ## Import General Tools
 import sys
 import os
@@ -60,8 +56,12 @@ def get_file_list(input):
     bias_files = []
     dark_files = []
     flat_files = []
+    dates = []
     for file in files:
         hdr = fits.getheader(file, 0)
+        date = hdr.get('DATE-OBS')
+        if not date in dates:
+            dates.append(date)
         if hdr.get('OBSTYPE').strip() == 'Bias':
             bias_files.append(file)
         elif hdr.get('OBSTYPE').strip() == 'Dark':
@@ -69,7 +69,8 @@ def get_file_list(input):
         elif hdr.get('OBSTYPE').strip() == 'IntFlat':
             flat_files.append(file)
 
-    dict = {'bias': bias_files, 'dark': dark_files, 'flat': flat_files}
+    dict = {'bias': bias_files, 'dark': dark_files, 'flat': flat_files,
+            'dates': dates}
 
     return dict
 
@@ -77,10 +78,12 @@ def get_file_list(input):
 ##-------------------------------------------------------------------------
 ## Determine Read Noise
 ##-------------------------------------------------------------------------
-def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
+def read_noise(lists, plots=False, logger=None, chips=[1,2,3],
                clipping_sigma=5, clipping_iters=3):
     '''
     '''
+    buf = 200  # pixel buffer for stats
+    bias_files = lists['bias']
     logger.info('Analyzing noise in bias frames to determine read noise')
     nbiases = len(bias_files)
     if plots:
@@ -98,7 +101,9 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
             logger.debug('  Reading bias: {}[{}]'.format(bias_file, chip))
             if bias_file == bias_files[0]:
                 bias0 = ccdproc.fits_ccddata_reader(bias_file, unit='adu', hdu=chip)
-                mean, median, stddev = stats.sigma_clipped_stats(bias0.data,
+                ny, nx = bias0.data.shape
+                mean, median, stddev = stats.sigma_clipped_stats(
+                                             bias0.data[buf:ny-buf,buf:nx-buf],
                                              sigma=clipping_sigma,
                                              iters=clipping_iters) * u.adu
                 mode = get_mode(bias0)
@@ -113,7 +118,9 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
                                       sigma_clip_low_thresh=clipping_sigma,
                                       sigma_clip_high_thresh=clipping_sigma)
         master_biases[chip] = master_bias
-        mean, median, stddev = stats.sigma_clipped_stats(master_bias.data,
+        ny, nx = master_bias.data.shape
+        mean, median, stddev = stats.sigma_clipped_stats(
+                                     master_bias.data[buf:ny-buf,buf:nx-buf],
                                      sigma=clipping_sigma,
                                      iters=clipping_iters) * u.adu
         mode = get_mode(master_bias)
@@ -122,7 +129,9 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
                     chip, mean.value, median.value, mode, stddev.value))
 
         diff = bias0.subtract(master_bias)
-        mean, median, stddev = stats.sigma_clipped_stats(diff.data,
+        ny, nx = diff.data.shape
+        mean, median, stddev = stats.sigma_clipped_stats(
+                                     diff.data[buf:ny-buf,buf:nx-buf],
                                      sigma=clipping_sigma,
                                      iters=clipping_iters) * u.adu
         mode = get_mode(diff)
@@ -142,14 +151,14 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
             bmax = np.ceil(max(diff.data.ravel())/binsize)*binsize + binsize/2.
             bins = np.arange(bmin,bmax,binsize)
             hist, bins = np.histogram(diff.data.ravel(), bins=bins)
-            centers = (bins[:-1] + bins[1:]) / 2
+            centers = (bins[:-1] + bins[1:]) / 2 * u.adu
             gaussian = models.Gaussian1D(amplitude=max(hist),\
                                          mean=mean,\
                                          stddev=RN)
             gaussian_plot = [gaussian(x) for x in centers]
-            plt.bar(centers, hist,
-                    align='center', width=0.7*binsize, log=True, color='{}'.format(color[chip].lower()),
-                    alpha=0.5,
+            plt.bar(centers.value, hist,
+                    align='center', width=0.7*binsize, log=True,
+                    color='{}'.format(color[chip].lower()), alpha=0.5,
                     label='{} CCD Pixel Count Histogram'.format(color[chip]))
             plt.plot(centers, gaussian_plot, '{}-'.format(color[chip].lower()), alpha=0.8,\
                      label='Gaussian with sigma = {:.2f}'.format(RN))
@@ -176,10 +185,12 @@ def read_noise(bias_files, plots=False, logger=None, chips=[1,2,3],
 ##-------------------------------------------------------------------------
 ## Determine Dark Current
 ##-------------------------------------------------------------------------
-def dark_current(dark_files, master_biases, plots=False, logger=None,
-                 chips=[1,2,3], clipping_sigma=5, clipping_iters=3, hpthresh=0.5):
+def dark_current(lists, master_biases, plots=False, logger=None,
+                 chips=[1,2,3], clipping_sigma=5, clipping_iters=3, hpthresh=1.0):
+    dark_files = lists['dark']
     ndarks = len(dark_files)
     binsize = 1.0
+    buf = 200  # pixel buffer for stats
 
     dark_table = Table(names=('filename', 'exptime', 'chip', 'mean', 'median', 'stddev', 'nhotpix'),\
                        dtype=('a64', 'f4', 'i4', 'f4', 'f4', 'f4', 'i4'))
@@ -195,10 +206,12 @@ def dark_current(dark_files, master_biases, plots=False, logger=None,
             logger.debug('  Reading dark: {}[{}]'.format(dark_file, chip))
             dark = ccdproc.fits_ccddata_reader(dark_file, unit='adu', hdu=chip)
             dark_diff = ccdproc.subtract_bias(dark, master_biases[chip])
-            mean, median, stddev = stats.sigma_clipped_stats(dark_diff.data,
+            ny, nx = dark_diff.data.shape
+            mean, median, stddev = stats.sigma_clipped_stats(
+                                         dark_diff.data[buf:ny-buf,buf:nx-buf],
                                          sigma=clipping_sigma,
                                          iters=clipping_iters) * u.adu
-            thresh = hpthresh*exptime # hot pixel defined as dark current of 0.2 ADU/s
+            thresh = hpthresh*exptime
             nhotpix = len(dark_diff.data.ravel()[dark_diff.data.ravel() > thresh])
             dark_table.add_row([dark_file, exptime, chip, mean, median, stddev, nhotpix])
 
@@ -238,7 +251,7 @@ def dark_current(dark_files, master_biases, plots=False, logger=None,
                     '{}o'.format(color[chip].lower()),\
                     label='mean count level in ADU ({})'.format(color[chip]),\
                     alpha=1.0)
-            ax.plot([0, 1000],\
+            ax.plot([0, longest_exptime],\
                     [dc_fit[chip](0), dc_fit[chip](1000)],\
                     '{}-'.format(color[chip].lower()),\
                     label='dark current ({}) = {:.2f} ADU/600s'.format(\
@@ -265,9 +278,10 @@ def dark_current(dark_files, master_biases, plots=False, logger=None,
 ##-------------------------------------------------------------------------
 ## Determine Gain
 ##-------------------------------------------------------------------------
-def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
-         chips=[1,2,3], clipping_sigma=5, clipping_iters=3, aduthreshold=15000):
-
+def gain(lists, master_biases, read_noise=None, plots=False, logger=None,
+         chips=[1,2,3], clipping_sigma=5, clipping_iters=3, aduthreshold=25000):
+    buf = 200  # pixel buffer for stats
+    flat_files = lists['flat']
     flat_table = Table()
     logger.info('Fitting model to signal vs. variance data to derive gain')
     logger.info('  Reading flat files')
@@ -275,8 +289,8 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
     ttimes = []
     ccds = {}
     signal = {}
-    for flat_file in flat_files:
-        logger.debug('  Reading {}'.format(flat_file))
+    for ffi,flat_file in enumerate(flat_files):
+        logger.debug('  Reading {:d}/{:d}: {}'.format(ffi, len(flat_files), flat_file))
         hdr = fits.getheader(flat_file, 0)
         exptimes.append(float(hdr['EXPTIME']))
         ttimes.append(float(hdr['TTIME']))
@@ -286,7 +300,9 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
                 signal[chip] = []
             exp = ccdproc.fits_ccddata_reader(flat_file, unit='adu', hdu=chip)
             ccds[flat_file][chip] = ccdproc.subtract_bias(exp, master_biases[chip])
-            mean, med, std = stats.sigma_clipped_stats(ccds[flat_file][chip].data,
+            ny, nx = ccds[flat_file][chip].data.shape
+            mean, med, std = stats.sigma_clipped_stats(
+                                   ccds[flat_file][chip].data[buf:ny-buf,buf:nx-buf],
                                    sigma=clipping_sigma,
                                    iters=clipping_iters)
             signal[chip].append(mean)
@@ -319,13 +335,17 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
                     meanA = exps[i]['signal{:d}'.format(chip)]
                     meanB = exps[i+1]['signal{:d}'.format(chip)]
                     ratio = meanA/meanB
-                    logger.debug('  Forming A-B difference pair for {:.1f} s exposure'.format(
-                                 float(ttime)))
+                    logger.debug('  Forming A-B difference pair with a scaling ratio of {:.3f}'.format(
+                                 float(ttime), ratio))
                     expB_scaled = expB.multiply(ratio)
                     diff = expA.subtract(expB_scaled)
-                    mean, med, std = stats.sigma_clipped_stats(diff.data,
-                                              sigma=clipping_sigma,
-                                              iters=clipping_iters)
+#                     if i==0:
+#                         diff.write('diff_{:d}s.fits'.format(int(ttime)))
+                    ny, nx = ccds[flat_file][chip].data.shape
+                    mean, med, std = stats.sigma_clipped_stats(
+                                        diff.data[buf:ny-buf,buf:nx-buf],
+                                        sigma=clipping_sigma,
+                                        iters=clipping_iters)
                     logger.debug('  Signal Level = {:.2f}'.format(meanA))
                     logger.debug('  Variance = {:.2f}'.format(std**2/2.0))
                     variance[chip].append(std**2/2.0)
@@ -338,6 +358,7 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
     g = {}
     gerr = {}
     linearity_fit = {}
+    linearity_fitp = {}
     mask = {}
     for chip in chips:
         mask[chip] = np.array(np.array(signal[chip]) > aduthreshold)
@@ -351,9 +372,14 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
             poly = models.Polynomial1D(degree=2)
         poly.c2.min = 0.0
         fitter = fitting.LevMarLSQFitter()
-        y = np.array(variance[chip])#[~mask[chip]]
-        x = np.array(signal[chip])#[~mask[chip]]
+        y = np.array(variance[chip])[~mask[chip]]
+        x = np.array(signal[chip])[~mask[chip]]
+        logger.info(f'{chip} Variance')
+        logger.info(y)
+        logger.info(f'{chip} Signal')
+        logger.info(x)
         gainfits[chip] = fitter(poly, x, y)
+        logger.info(gainfits[chip])
         perr = np.sqrt(np.diag(fitter.fit_info['param_cov']))
         ksq = gainfits[chip].c2.value
         ksqerr = perr[1]
@@ -382,70 +408,106 @@ def gain(flat_files, master_biases, read_noise=None, plots=False, logger=None,
         fitter = fitting.LinearLSQFitter()
         x = np.array(signal_times[chip])[~mask[chip]]
         y = np.array(signal[chip])[~mask[chip]]
+        logger.info(f'{chip} Signal Times')
+        logger.info(x)
+        logger.info(f'{chip} Signal')
+        logger.info(y)
         linearity_fit[chip] = fitter(line, x, y)
+        logger.info(linearity_fit[chip])
+
+        ## Fit Linearity with Polynomial
+        poly = models.Polynomial1D(degree=2)
+        fitter = fitting.LevMarLSQFitter()
+        linearity_fitp[chip] = fitter(poly, x, y)
+        logger.info(linearity_fitp[chip])
 
     ##-------------------------------------------------------------------------
     ## Plot Flat Statistics
     ##-------------------------------------------------------------------------
     if plots:
-        logger.info('  Generating figure with flat statistics and gain fits')
-        plt.figure(figsize=(11,len(chips)*5), dpi=72)
-        color = {1: 'B', 2: 'G', 3: 'R'}
-        for chip in chips:
-            ax = plt.subplot(len(chips),1,chip)
+        for type in ['', '_log']:
+            logger.info('  Generating figure with flat statistics and gain fits')
+            plt.figure(figsize=(11,len(chips)*5), dpi=72)
+            color = {1: 'B', 2: 'G', 3: 'R'}
+            for chip in chips:
+                ax = plt.subplot(len(chips),1,chip)
 
-            x = np.array(signal[chip])[mask[chip]]
-            y = np.array(variance[chip])[mask[chip]]
-            ax.plot(x, y, '{}o'.format(color[chip].lower()), alpha=0.3,\
-                    markersize=5, markeredgewidth=0)
+                x = np.array(signal[chip])[mask[chip]]
+                y = np.array(variance[chip])[mask[chip]]
+                ax.plot(x, y, '{}o'.format(color[chip].lower()), alpha=0.3,\
+                        markersize=5, markeredgewidth=0)
 
-            x = np.array(signal[chip])[~mask[chip]]
-            y = np.array(variance[chip])[~mask[chip]]
-            ax.plot(x, y, '{}o'.format(color[chip].lower()), alpha=1.0,\
-                    markersize=8, markeredgewidth=0)
+                x = np.array(signal[chip])[~mask[chip]]
+                y = np.array(variance[chip])[~mask[chip]]
+                if type == '_log':
+                    ax.semilogx(x, y, '{}o'.format(color[chip].lower()), alpha=1.0,\
+                            markersize=8, markeredgewidth=0)
 
-            sig_fit = np.linspace(min(signal[chip]), max(signal[chip]), 50)
-            var_fit = [gainfits[chip](x) for x in sig_fit]
-            ax.plot(sig_fit, var_fit,\
-                    '{}-'.format(color[chip].lower()),\
-                    label='Gain={:.2f} +/- {:.2f} e/ADU'.format(
-                          g[chip].value, gerr[chip].value),
-                    alpha=0.7)
+                    sig_fit = np.linspace(min(signal[chip]), max(signal[chip]), 50)
+                    var_fit = [gainfits[chip](x) for x in sig_fit]
+                    ax.semilogx(sig_fit, var_fit,\
+                            '{}-'.format(color[chip].lower()),\
+                            label='Gain={:.2f} +/- {:.2f} e/ADU'.format(
+                                  g[chip].value, gerr[chip].value),
+                            alpha=0.7)
+                else:
+                    ax.plot(x, y, '{}o'.format(color[chip].lower()), alpha=1.0,\
+                            markersize=8, markeredgewidth=0)
 
-            ax.set_ylabel('Variance')
-            ax.set_xlabel('Mean Level (ADU)')
-            ax.grid()
-            ax.legend(loc='upper left', fontsize=10)
-        plotfilename = 'FlatStats.png'
-        logger.info('  Saving: {}'.format(plotfilename))
-        plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
-        plt.close()
-        logger.info('  Done.')
+                    sig_fit = np.linspace(min(signal[chip]), max(signal[chip]), 50)
+                    var_fit = [gainfits[chip](x) for x in sig_fit]
+                    ax.plot(sig_fit, var_fit,\
+                            '{}-'.format(color[chip].lower()),\
+                            label='Gain={:.2f} +/- {:.2f} e/ADU'.format(
+                                  g[chip].value, gerr[chip].value),
+                            alpha=0.7)
+
+                ax.set_ylabel('Variance')
+                ax.set_xlabel('Mean Level (ADU)')
+                ax.grid()
+                ax.legend(loc='upper left', fontsize=10)
+            plotfilename = 'FlatStats{}.png'.format(type)
+            logger.info('  Saving: {}'.format(plotfilename))
+            plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
+            plt.close()
+            logger.info('  Done.')
 
 
-        logger.info('  Generating figure with linearity plot')
-        plt.figure(figsize=(11,len(chips)*5), dpi=72)
-        color = {1: 'B', 2: 'G', 3: 'R'}
-        for chip in chips:
-            ax = plt.subplot(len(chips),1,chip)
+            logger.info('  Generating figure with linearity plot')
+            plt.figure(figsize=(11,len(chips)*5), dpi=72)
+            color = {1: 'B', 2: 'G', 3: 'R'}
+            decrements = []
+            for chip in chips:
+                counts = np.array(signal[chip])
+                time = np.array(signal_times[chip])
+                fit_counts = [linearity_fitp[chip](t) for t in time]
+                decrement = (counts-fit_counts)/counts * 100.
+                decrements.extend(list(decrement))
+            for chip in chips:
+                ax = plt.subplot(len(chips),1,chip)
+                time = np.array(signal_times[chip])
+                counts = np.array(signal[chip])
+                fit_counts = [linearity_fitp[chip](t) for t in time]
+                y = (counts-fit_counts)/counts * 100.
 
-            time = np.array(signal_times[chip])
-            counts = np.array(signal[chip])
-            fit_counts = [linearity_fit[chip](t) for t in time]
-            y = (counts-fit_counts)/counts * 100.
+                if type == '_log':
+                    ax.semilogx(counts, y, '{}o'.format(color[chip].lower()), alpha=0.5,\
+                            markersize=5, markeredgewidth=0)
+                    ax.semilogx([min(counts), max(counts)], [0, 0], 'k-')
+                else:
+                    ax.plot(counts, y, '{}o'.format(color[chip].lower()), alpha=0.5,\
+                            markersize=5, markeredgewidth=0)
+                    ax.plot([min(counts), max(counts)], [0, 0], 'k-')
 
-            ax.plot(counts, y, '{}o'.format(color[chip].lower()), alpha=0.5,\
-                    markersize=5, markeredgewidth=0)
-            ax.plot([0, max(counts)], [0, 0], 'k-')
-
-            ax.set_xlabel('Counts (ADU)')
-            ax.set_ylabel('Signal Decrement (%) [(counts-fit)/counts]')
-            ax.grid()
-        plotfilename = 'Linearity.png'
-        logger.info('  Saving: {}'.format(plotfilename))
-        plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
-        plt.close()
-        logger.info('  Done.')
+                ax.set_xlabel('Counts (ADU)')
+                ax.set_ylabel('Signal Decrement (%) [(counts-fit)/counts]')
+                plt.ylim(np.floor(min(decrements)), np.ceil(max(decrements)))
+                ax.grid()
+            plotfilename = 'Linearity{}.png'.format(type)
+            logger.info('  Saving: {}'.format(plotfilename))
+            plt.savefig(plotfilename, dpi=72, bbox_inches='tight')
+            plt.close()
+            logger.info('  Done.')
 
     return g, gerr
 
@@ -488,26 +550,28 @@ if __name__ == '__main__':
     LogConsoleHandler.setFormatter(LogFormat)
     logger.addHandler(LogConsoleHandler)
     ## Set up file output
-#     LogFileName = None
-#     LogFileHandler = logging.FileHandler(LogFileName)
-#     LogFileHandler.setLevel(logging.DEBUG)
-#     LogFileHandler.setFormatter(LogFormat)
-#     logger.addHandler(LogFileHandler)
+    LogFileName = 'HIREScheckout.txt'
+    LogFileHandler = logging.FileHandler(LogFileName)
+    LogFileHandler.setLevel(logging.INFO)
+    LogFileHandler.setFormatter(LogFormat)
+    logger.addHandler(LogFileHandler)
 
     chips = [1, 2, 3]
     lists = get_file_list(args.input)
-    RNC, master_biases = read_noise(lists['bias'],
+    RNC, master_biases = read_noise(lists,
                                    plots=plots, logger=logger, chips=chips)
-    DCC = dark_current(lists['dark'], master_biases,
-                      plots=plots, logger=logger, chips=chips)
-    g, gerr = gain(lists['flat'], master_biases, read_noise=RNC,
+    if len(lists['dark']) > 0:
+        DCC = dark_current(lists, master_biases,
+                          plots=plots, logger=logger, chips=chips)
+    g, gerr = gain(lists, master_biases, read_noise=RNC,
                    plots=plots, logger=logger, chips=chips)
 
     for chip in chips:
         RNe = RNC[chip] * g[chip]
-        DCe = DCC[chip][0] * g[chip]
-        print('Chip {:d}'.format(chip))
-        print('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNe))
-        print('  Dark Current[{:d}] = {:.4f}'.format(chip, DCe))
-        print('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, DCC[chip][1], DCC[chip][2]))
-        print('  Gain[{:d}]         = {:.2f} +/- {:.2f} e/ADU'.format(chip, g[chip].value, gerr[chip].value))
+        logger.info('Chip {:d}'.format(chip))
+        logger.info('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNe))
+        if len(lists['dark']) > 0:
+            DCe = DCC[chip][0] * g[chip]
+            logger.info('  Dark Current[{:d}] = {:.4f}'.format(chip, DCe))
+            logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, DCC[chip][1], DCC[chip][2]))
+        logger.info('  Gain[{:d}]         = {:.2f} +/- {:.2f} e/ADU'.format(chip, g[chip].value, gerr[chip].value))
