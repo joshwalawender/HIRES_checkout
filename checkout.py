@@ -95,7 +95,7 @@ def read_noise(lists, plots=False, logger=None, chips=[1,2,3],
         logger.info('  Analyzing Chip {:d}'.format(chip))
         if plots:
             ax = plt.subplot(len(chips),1,chip)
-            color = {1: 'B', 2: 'G', 3: 'R'}
+            color = {1: 'B', 2: 'G', 3: 'R', 4: 'Y'}
         biases = []
         for bias_file in bias_files:
             logger.debug('  Reading bias: {}[{}]'.format(bias_file, chip))
@@ -226,15 +226,15 @@ def dark_current(lists, master_biases, plots=False, logger=None,
 
     dark_stats = {}
     for chip in chips:
-        dc_fit[chip] = fitter(line, dark_table[dark_table['chip'] == chip]['exptime'],\
+        dc_fit[chip] = fitter(line, 
+                              dark_table[dark_table['chip'] == chip]['exptime'],
                               dark_table[dark_table['chip'] == chip]['mean'])
-#         print(fitter.fit_info)
-        dark_current = dc_fit[chip].slope.value * u.adu/u.second
+        dark_current = dc_fit[chip].slope.value * 3600 * u.adu/u.hour
         thischip = long_dark_table[long_dark_table['chip'] == chip]
         nhotpix = int(np.mean(thischip['nhotpix'])) * u.pix
         nhotpixstd = int(np.std(thischip['nhotpix'])) / np.sqrt(len(thischip['nhotpix'])) * u.pix
         logger.info('  Analyzing Chip {:d}'.format(chip))
-        logger.info('  Dark Current[{:d}] = {:.4f} ADU/600s'.format(chip, dark_current.value*600.))
+        logger.info('  Dark Current[{:d}] = {:.1f} ADU/hr'.format(chip, dark_current.value))
         logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, nhotpix, nhotpixstd))
         dark_stats[chip] = [dark_current, nhotpix, nhotpixstd]
 
@@ -242,7 +242,7 @@ def dark_current(lists, master_biases, plots=False, logger=None,
     ## Plot Dark Frame Levels
     ##-------------------------------------------------------------------------
     if plots:
-        color = {1: 'B', 2: 'G', 3: 'R'}
+        color = {1: 'B', 2: 'G', 3: 'R', 4: 'Y'}
         plt.figure(figsize=(11,len(chips)*5), dpi=72)
         for chip in chips:
             ax = plt.subplot(len(chips),1,chip)
@@ -252,10 +252,10 @@ def dark_current(lists, master_biases, plots=False, logger=None,
                     label='mean count level in ADU ({})'.format(color[chip]),\
                     alpha=1.0)
             ax.plot([0, longest_exptime],\
-                    [dc_fit[chip](0), dc_fit[chip](1000)],\
+                    [dc_fit[chip](0), dc_fit[chip](longest_exptime)],\
                     '{}-'.format(color[chip].lower()),\
-                    label='dark current ({}) = {:.2f} ADU/600s'.format(\
-                          color[chip], dc_fit[chip].slope.value*600.),\
+                    label='dark current ({}) = {:.2f} ADU/hr'.format(\
+                          color[chip], dark_stats[chip][0].value),\
                     alpha=0.3)
             plt.xlim(-0.02*max(dark_table['exptime']), 1.10*max(dark_table['exptime']))
             min_level = np.floor(min(dark_table['mean']))
@@ -323,8 +323,12 @@ def gain(lists, master_biases, read_noise=None, plots=False, logger=None,
         logger.info('  Measuring statistics for {:.0f} s flats'.format(float(ttime)))
         for i in np.arange(0,nexps,2):
             if i+1 < nexps:
-                flat_fileA = exps['filename'][i].decode('utf8')
-                flat_fileB = exps['filename'][i+1].decode('utf8')
+                try:
+                    flat_fileA = exps['filename'][i].decode('utf8')
+                    flat_fileB = exps['filename'][i+1].decode('utf8')
+                except:
+                    flat_fileA = exps['filename'][i]
+                    flat_fileB = exps['filename'][i+1]
                 for chip in chips:
                     if not chip in signal.keys():
                         signal[chip] = []
@@ -428,7 +432,7 @@ def gain(lists, master_biases, read_noise=None, plots=False, logger=None,
         for type in ['', '_log']:
             logger.info('  Generating figure with flat statistics and gain fits')
             plt.figure(figsize=(11,len(chips)*5), dpi=72)
-            color = {1: 'B', 2: 'G', 3: 'R'}
+            color = {1: 'B', 2: 'G', 3: 'R', 4: 'Y'}
             for chip in chips:
                 ax = plt.subplot(len(chips),1,chip)
 
@@ -475,7 +479,7 @@ def gain(lists, master_biases, read_noise=None, plots=False, logger=None,
 
             logger.info('  Generating figure with linearity plot')
             plt.figure(figsize=(11,len(chips)*5), dpi=72)
-            color = {1: 'B', 2: 'G', 3: 'R'}
+            color = {1: 'B', 2: 'G', 3: 'R', 4: 'Y'}
             decrements = []
             for chip in chips:
                 counts = np.array(signal[chip])
@@ -556,22 +560,32 @@ if __name__ == '__main__':
     LogFileHandler.setFormatter(LogFormat)
     logger.addHandler(LogFileHandler)
 
-    chips = [1, 2, 3]
+    chips = [1, 2, 3, 4]
     lists = get_file_list(args.input)
     RNC, master_biases = read_noise(lists,
                                    plots=plots, logger=logger, chips=chips)
+    DCC = None
     if len(lists['dark']) > 0:
         DCC = dark_current(lists, master_biases,
                           plots=plots, logger=logger, chips=chips)
-    g, gerr = gain(lists, master_biases, read_noise=RNC,
-                   plots=plots, logger=logger, chips=chips)
+    g = None
+    if len(lists['flat']) > 0:
+        g, gerr = gain(lists, master_biases, read_noise=RNC,
+                       plots=plots, logger=logger, chips=chips)
 
     for chip in chips:
-        RNe = RNC[chip] * g[chip]
         logger.info('Chip {:d}'.format(chip))
-        logger.info('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNe))
-        if len(lists['dark']) > 0:
-            DCe = DCC[chip][0] * g[chip]
-            logger.info('  Dark Current[{:d}] = {:.4f}'.format(chip, DCe))
+        if g is not None:
+            RNe = RNC[chip] * g[chip]
+            logger.info('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNe))
+        else:
+            logger.info('  Read Noise[{:d}]   = {:.1f}'.format(chip, RNC[chip]))
+        if DCC is not None:
+            if g is not None:
+                DCe = DCC[chip][0] * g[chip]
+                logger.info('  Dark Current[{:d}] = {:.2f}'.format(chip, DCe))
+            else:
+                logger.info('  Dark Current[{:d}] = {:.2f}'.format(chip, DCC[chip][0]))
             logger.info('  N Hot Pixels[{:d}] = {:.0f} +/- {:.0f}'.format(chip, DCC[chip][1], DCC[chip][2]))
-        logger.info('  Gain[{:d}]         = {:.2f} +/- {:.2f} e/ADU'.format(chip, g[chip].value, gerr[chip].value))
+        if g is not None:
+            logger.info('  Gain[{:d}]         = {:.2f} +/- {:.2f} e/ADU'.format(chip, g[chip].value, gerr[chip].value))
