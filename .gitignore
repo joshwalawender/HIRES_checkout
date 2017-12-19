@@ -4,3 +4,6 @@ dark_table.txt
 files*.txt
 .gitignore
 *.fits
+/HIREScheckout.txt
+/deimos_files2.txt
+/deimos_files.txt
